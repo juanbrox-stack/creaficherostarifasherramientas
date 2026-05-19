@@ -168,8 +168,8 @@ with tab1:
                         # Convertir explícitamente a string con punto decimal para evitar pérdidas de formato
                         df_out['valor'] = df_out['valor'].apply(lambda x: "{:.2f}".format(x) if x is not None else "")
                         
-                        # --- CORRECCIÓN CRÍTICA DE SALTO DE LÍNEA PARA WINDOWS/EXCEL (\r\n) ---
-                        csv_body = df_out.to_csv(index=False, sep=',', encoding='utf-8', line_terminator='\r\n')
+                        # --- CORRECCIÓN DE PARÁMETRO DE PANDAS: lineterminator (sin guion bajo) ---
+                        csv_body = df_out.to_csv(index=False, sep=',', encoding='utf-8', lineterminator='\r\n')
                         csv_data = f"sep=,\r\n{csv_body}"
                         
                         zip_file.writestr(f"{nombre_carac}.csv", csv_data)
@@ -209,7 +209,6 @@ with tab2:
             skus_totales.update(map_base_nac.keys())
 
             # 2. Construcción de mapeos específicos por canal
-            # Canales Nacionales mapeados directamente contra la Columna P (índice 15) de T_AMZ
             map_spain = extraer_precios_por_posicion(df_nac_base, idx_ref_nac, idx_pvp_nac)
             map_pcc = map_spain
             map_mm = map_spain
@@ -226,12 +225,11 @@ with tab2:
             map_de = buscar_y_extraer(["DE-DE", "ES-DE"], 2, 12)
             map_pt = buscar_y_extraer(["PT"], 2, 12)
             map_nl = buscar_y_extraer(["NL"], 2, 12)
-            map_pl_eur = buscar_y_extraer(["PL"], 2, 13) # Devuelve originalmente en Euros
+            map_pl_eur = buscar_y_extraer(["PL"], 2, 13)
 
             # 3. Ensamblar la estructura final requerida de 19 columnas
             filas_cargador = []
             for sku in sorted(skus_totales):
-                # Aplicar conversión a Zlotis polacos (PLN) directamente
                 precio_pln = map_pl_eur.get(sku)
                 if precio_pln is not None:
                     precio_pln = round(precio_pln * tipo_cambio_pln, 2)
@@ -261,7 +259,6 @@ with tab2:
 
             df_cargador = pd.DataFrame(filas_cargador)
             
-            # Formatear columnas numéricas para forzar punto decimal limpio (.2f)
             columnas_precios = [col for col in df_cargador.columns if col != "reference" and col != "Acción"]
             for col in columnas_precios:
                 df_cargador[col] = df_cargador[col].apply(lambda x: f"{x:.2f}" if isinstance(x, (int, float)) else x)
@@ -270,8 +267,8 @@ with tab2:
             st.write("### Vista Previa del Fichero de Carga Generado")
             st.dataframe(df_cargador.head(10))
 
-            # --- EXPORTACIÓN FINAL CON FORMATO INTEGRAL EXCEL WINDOWS ---
-            cargador_body = df_cargador.to_csv(index=False, sep=',', encoding='utf-8', line_terminator='\r\n')
+            # --- CORRECCIÓN DE PARÁMETRO DE PANDAS: lineterminator (sin guion bajo) ---
+            cargador_body = df_cargador.to_csv(index=False, sep=',', encoding='utf-8', lineterminator='\r\n')
             cargador_csv_data = f"sep=,\r\n{cargador_body}"
 
             st.download_button(
