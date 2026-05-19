@@ -2,147 +2,136 @@ import streamlit as st
 import pandas as pd
 import io
 import zipfile
-import re
 
-# Configuración de la interfaz de la aplicación de Streamlit
-st.set_page_config(page_title="Generador de Tarifas - Turaco", page_icon="📦", layout="wide")
+# Configuración de página de Streamlit
+st.set_page_config(page_title="Actualizador de Tarifas e Ingestas", layout="wide", page_icon="📊")
 
-st.title("📦 Automatización de Tarifas - Turaco Herramientas")
-st.write("Carga los archivos maestros de Excel para procesar masivamente todas las plantillas de subida requeridas.")
-
-# --- FUNCIÓN AUXILIAR DE FORMATEO DE SKU ---
-def formatear_sku(val):
-    if pd.isna(val):
-        return ""
-    val_str = str(val).strip()
-    if val_str.endswith('.0'):
-        val_str = val_str[:-2]
-    # Si es numérico puro, rellenar con ceros a la izquierda hasta llegar a 5 dígitos (ej: 120 -> 00120)
-    if val_str.isdigit():
-        return val_str.zfill(5)
-    # Si es alfanumérico (ej. A01, A90, A70, V0416), se mantiene idéntico
-    return val_str
-
-# --- FUNCIÓN AUXILIAR PARA LIMPIAR Y CONVERTIR PRECIOS EN TEXTO/DIVISAS ---
-def limpiar_y_convertir_precio(val):
-    if pd.isna(val):
-        return None
-    val_str = str(val).strip()
-    # Eliminar cualquier carácter que no sea número, signo menos, coma o punto
-    val_limpio = re.sub(r'[^\d.,-]', '', val_str)
-    
-    if not val_limpio:
-        return None
-        
-    # Si contiene comas y puntos (ej: 1,200.50), quitamos la coma de miles
-    if ',' in val_limpio and '.' in val_limpio:
-        val_limpio = val_limpio.replace(',', '')
-    # Si solo tiene comas como separador decimal (ej: 32,95), la cambiamos por punto
-    elif ',' in val_limpio:
-        val_limpio = val_limpio.replace(',', '.')
-    
-    try:
-        return round(float(val_limpio), 2)
-    except ValueError:
-        return None
-
-# --- FUNCIÓN PARA EXTRAER PRECIOS POR POSICIÓN ESTRICTA DE COLUMNA ---
-def extraer_precios_por_posicion(df, idx_col_ref, idx_col_precio):
+# =========================================================================
+# FUNCIONES AUXILIARES DE EXTRACCIÓN (LÓGICA INTERNA DE NEGOCIO)
+# =========================================================================
+def extraer_precios_por_posicion(df, col_ref_idx, col_precio_idx):
+    """
+    Extrae un diccionario de SKU -> Precio basándose estrictamente en índices de columnas.
+    Corrige los prefijos de SKU ('00', '0', etc.) según las reglas del negocio.
+    """
     mapping = {}
-    if df is None or df.empty:
+    if df is None:
         return mapping
         
-    for _, row in df.iterrows():
-        if len(row) > max(idx_col_ref, idx_col_precio):
-            val_ref = row.iloc[idx_col_ref]
-            val_precio = row.iloc[idx_col_precio]
+    for index, row in df.iterrows():
+        # Saltamos cabeceras o filas vacías analizando la primera celda identificable
+        if index < 1 or col_ref_idx >= len(row) or pd.isna(row.iloc[col_ref_idx]):
+            continue
             
-            # Omitir si la celda es vacía o es la fila de encabezados de la tabla
-            if pd.isna(val_ref) or str(val_ref).strip().upper() in ["REFERENCIA", "REFERENCE", "REF", "REF."]:
-                continue
-                
-            sku = formatear_sku(val_ref)
-            if not sku:
-                continue
-                
-            precio = limpiar_y_convertir_precio(val_precio)
-            if precio is not None:
-                mapping[sku] = precio
+        ref_raw = str(row.iloc[col_ref_idx]).strip()
+        if ref_raw.upper() in ["REFERENCIA", "SKU", "NOMBRE COMPLETO", ""]:
+            continue
+            
+        # Formatear el SKU según reglas de longitud y tipo
+        if ref_raw.isdigit():
+            num_int = int(ref_raw)
+            if num_int < 120:
+                ref_formateada = f"{num_int:03d}"  # 112 -> 112 (mantiene 3 dígitos)
+            else:
+                ref_formateada = f"{num_int:05d}"  # 120 -> 00120, 1503 -> 01503
+        else:
+            ref_formateada = ref_raw  # A01, A90, A70 se quedan igual
+
+        # Extraer y limpiar el precio correspondiente
+        precio_val = None
+        if col_precio_idx is not None and col_precio_idx < len(row):
+            val = row.iloc[col_precio_idx]
+            if pd.notna(val):
+                try:
+                    # Eliminar símbolos monetarios o espacios si los hubiera
+                    val_str = str(val).replace('€', '').replace('$', '').strip()
+                    precio_val = float(val_str)
+                except ValueError:
+                    pass
+        
+        mapping[ref_formateada] = precio_val
     return mapping
 
-# --- BARRA LATERAL: CAPTURA DE ARCHIVOS MAESTROS ---
-st.sidebar.header("📂 Archivos Maestros de Origen")
-archivo_nac = st.sidebar.file_uploader("1. Tarifa Nacional España (.xlsx)", type=["xlsx"])
-archivo_int = st.sidebar.file_uploader("2. Tarifa Internacional (.xlsx)", type=["xlsx"])
 
-# Inicializar diccionarios para contener las pestañas indexadas
+# =========================================================================
+# BARRA LATERAL - CARGA DE ARCHIVOS FUENTE
+# =========================================================================
+st.sidebar.header("📁 Carga de Archivos de Origen")
+archivo_nac = st.sidebar.file_uploader("1. Tarifa Nacional (Excel)", type=["xlsx"])
+archivo_int = st.sidebar.file_uploader("2. Tarifa Internacional (Excel)", type=["xlsx"])
+
 pestañas_nac = {}
 pestañas_int = {}
+pestaña_nac_real = "T_AMZ"  # Forzamos la pestaña especificada por el usuario
 
 if archivo_nac:
     try:
-        xls_nac = pd.ExcelFile(archivo_nac)
-        for sheet in xls_nac.sheet_names:
-            # Leemos con header=None para poder controlar las posiciones de columnas absolutas (Columna C=2, M=12, N=13)
-            pestañas_nac[sheet] = pd.read_excel(archivo_nac, sheet_name=sheet, header=None)
-        st.sidebar.success("✅ Tarifa Nacional cargada correctamente.")
+        xl_nac = pd.ExcelFile(archivo_nac)
+        for sheet in xl_nac.sheet_names:
+            pestañas_nac[sheet] = xl_nac.parse(sheet, header=None)
+        st.sidebar.success(f"Nacional cargado ({len(pestañas_nac)} pestañas)")
     except Exception as e:
-        st.sidebar.error(f"Error al cargar Tarifa Nacional: {e}")
+        st.sidebar.error(f"Error al leer Nacional: {e}")
 
 if archivo_int:
     try:
-        xls_int = pd.ExcelFile(archivo_int)
-        for sheet in xls_int.sheet_names:
-            pestañas_int[sheet] = pd.read_excel(archivo_int, sheet_name=sheet, header=None)
-        st.sidebar.success("✅ Tarifa Internacional cargada correctamente.")
+        xl_int = pd.ExcelFile(archivo_int)
+        for sheet in xl_int.sheet_names:
+            pestañas_int[sheet] = xl_int.parse(sheet, header=None)
+        st.sidebar.success(f"Internacional cargado ({len(pestañas_int)} pestañas)")
     except Exception as e:
-        st.sidebar.error(f"Error al cargar Tarifa Internacional: {e}")
+        st.sidebar.error(f"Error al leer Internacional: {e}")
 
-# Definición de pestañas de la interfaz
-tab1, tab2 = st.tabs(["📋 Bloque 1: Actualizador Características", "💰 Bloque 2: Cargador de Precios"])
-
-# Configuración por defecto de las pestañas reales en los Excel
-pestaña_nac_defecto = "T_PRIV"
 
 # =========================================================================
-# SECCIÓN 1: DESCARGA MASIVA POR CARACTERÍSTICAS (BLOQUE 1)
+# CUERPO PRINCIPAL - ESTRUCTURA DE PESTAÑAS (BLOQUES DE TRABAJO)
 # =========================================================================
+st.title("⚙️ Sistema Inteligente de Procesamiento de Tarifas")
+tab1, tab2 = st.tabs(["📦 Bloque 1: Características", "🚀 Bloque 2: Cargador General de Precios"])
+
+# Mapeo fijo según especificaciones del usuario para la Tarifa Nacional:
+# Columna A (Índice 0) = Referencia
+# Columna P (Índice 15) = Precio (PVP PUB)
+idx_ref_nac = 0
+idx_pvp_nac = 15
+
+# -------------------------------------------------------------------------
+# BLOQUE 1: GENERACIÓN MASIVA POR CARACTERÍSTICAS
+# -------------------------------------------------------------------------
 with tab1:
     st.header("Generación por Lotes de Archivos de Características")
     st.write("Esta sección extraerá automáticamente cada característica obligatoria y creará un archivo independiente con su nombre.")
 
-    # Mapeo de reglas basadas en tus indicaciones: 
-    # Formato: "Nombre_Caracteristica": (Tipo_Tarifa, Lista_Posibles_Pestañas, Indice_Col_Ref, Indice_Col_Precio)
-    # Columna C = 2, Columna M = 12, Columna N = 13
+    # Reglas de negocio para características de exportación masiva
     reglas_caracteristicas = {
-        # España (Tarifa Nacional) -> Mapeamos dinámicamente usando la columna de precio PVPR (asumimos Columna D/E o la buscamos)
-        "PVP_LEROYES": ("Nacional", [pestaña_nac_defecto], 2, None), 
-        "PVP_PcComponentes": ("Nacional", [pestaña_nac_defecto], 2, None),
-        "PVPR": ("Nacional", [pestaña_nac_defecto], 2, None),
-        "PVP ESPANA": ("Nacional", [pestaña_nac_defecto], 2, None),
-        "Pvp mediamarkt es": ("Nacional", [pestaña_nac_defecto], 2, None),
-        "PVP_SHEIN_ES": ("Nacional", [pestaña_nac_defecto], 2, None),
-        # Francia (Col C, Col M)
+        # España (Tarifa Nacional -> pestaña T_AMZ)
+        "PVP_LEROYES": ("Nacional", ["T_AMZ"], idx_ref_nac, idx_pvp_nac), 
+        "PVP_PcComponentes": ("Nacional", ["T_AMZ"], idx_ref_nac, idx_pvp_nac),
+        "PVPR": ("Nacional", ["T_AMZ"], idx_ref_nac, idx_pvp_nac),
+        "PVP ESPANA": ("Nacional", ["T_AMZ"], idx_ref_nac, idx_pvp_nac),
+        "Pvp mediamarkt es": ("Nacional", ["T_AMZ"], idx_ref_nac, idx_pvp_nac),
+        "PVP_SHEIN_ES": ("Nacional", ["T_AMZ"], idx_ref_nac, idx_pvp_nac),
+        # Francia (Col C=2, Col M=12)
         "Prix_France": ("Internacional", ["FR-FR", "ES-FR"], 2, 12),
         "PVP_SHEIN_FR": ("Internacional", ["FR-FR", "ES-FR"], 2, 12),
-        # Italia (Col C, Col M)
+        # Italia (Col C=2, Col M=12)
         "Prix_Italia": ("Internacional", ["IT-IT", "ES-IT"], 2, 12),
         "PVP_SHEIN_IT": ("Internacional", ["IT-IT", "ES-IT"], 2, 12),
-        # Alemania (Col C, Col M)
+        # Alemania (Col C=2, Col M=12)
         "prix_Alemania": ("Internacional", ["DE-DE", "ES-DE"], 2, 12),
         "PVP_SHEIN_DE": ("Internacional", ["DE-DE", "ES-DE"], 2, 12),
-        # Portugal (Col C, Col M)
+        # Portugal (Col C=2, Col M=12)
         "PVP_SHEIN_PT": ("Internacional", ["PT"], 2, 12),
         "PVP PORTUGAL": ("Internacional", ["PT"], 2, 12),
-        # Bélgica (Col C, Col M)
+        # Bélgica (Col C=2, Col M=12)
         "PVP_BE": ("Internacional", ["BE"], 2, 12),
-        # Países Bajos (Col C, Col M)
+        # Países Bajos (Col C=2, Col M=12)
         "PRIXHOLANDA": ("Internacional", ["NL"], 2, 12),
         "PVP_SHEIN_NL": ("Internacional", ["NL"], 2, 12),
-        # Polonia (Col C, Col N)
+        # Polonia (Col C=2, Col N=13)
         "PVP_SHEIN_PL": ("Internacional", ["PL"], 2, 13),
         "PRIX_POLONIA": ("Internacional", ["PL"], 2, 13),
-        # Suecia (Col C, Col N)
+        # Suecia (Col C=2, Col N=13)
         "PVP Suecia": ("Internacional", ["SE"], 2, 13)
     }
 
@@ -155,35 +144,18 @@ with tab1:
             
             with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
                 
-                # Obtener mapeo base de la Tarifa Nacional de forma flexible para España
-                df_nac_base = None
-                for name in [pestaña_nac_defecto] + list(pestañas_nac.keys()):
-                    if name in pestañas_nac:
-                        df_nac_base = pestañas_nac[name]
-                        break
-                
-                # Buscar dinámicamente la columna que contiene "PVPR" y "REFERENCIA" en la hoja Nacional si no son fijas
-                idx_ref_nac, idx_pvp_nac = 2, 4 # Fallbacks por defecto (C y E)
-                if df_nac_base is not None:
-                    for r_idx, row in df_nac_base.head(5).iterrows():
-                        row_strs = [str(item).strip().upper() for item in row]
-                        if "REFERENCIA" in row_strs:
-                            idx_ref_nac = row_strs.index("REFERENCIA")
-                        for idx, item in enumerate(row_strs):
-                            if "PVPR" in item:
-                                idx_pvp_nac = idx
-                                break
+                # Obtener la hoja T_AMZ obligatoriamente, si no existe usa la primera disponible
+                df_nac_base = pestañas_nac.get("T_AMZ", next(iter(pestañas_nac.values())) if pestañas_nac else None)
 
-                # Bucle de extracción masiva
+                # Bucle de procesamiento masivo por características
                 for nombre_carac, (tipo, posibles_pestañas, col_ref, col_precio) in reglas_caracteristicas.items():
                     df_trabajo = None
                     mapping_precios = {}
                     
                     if tipo == "Nacional":
                         df_trabajo = df_nac_base
-                        mapping_precios = extraer_precios_por_posicion(df_trabajo, idx_ref_nac, idx_pvp_nac)
+                        mapping_precios = extraer_precios_por_posicion(df_trabajo, col_ref, col_precio)
                     else:
-                        # Buscar cuál pestaña internacional existe de la lista de opciones
                         for p in posibles_pestañas:
                             if p in pestañas_int:
                                 df_trabajo = pestañas_int[p]
@@ -191,18 +163,20 @@ with tab1:
                         mapping_precios = extraer_precios_por_posicion(df_trabajo, col_ref, col_precio)
                     
                     if mapping_precios:
-                        # Estructurar DataFrame para subir por características (sku, valor)
                         df_out = pd.DataFrame(list(mapping_precios.items()), columns=['sku', 'valor'])
                         
-                        # Generación del string del CSV con la directiva invisible de separación para Excel
-                        csv_data = "sep=,\n" + df_out.to_csv(index=False, sep=',', encoding='utf-8')
+                        # Convertir explícitamente a string con punto decimal para evitar pérdidas de formato
+                        df_out['valor'] = df_out['valor'].apply(lambda x: "{:.2f}".format(x) if x is not None else "")
                         
-                        # Escribir el fichero dentro del ZIP con el nombre exacto de la característica
+                        # --- CORRECCIÓN CRÍTICA DE SALTO DE LÍNEA PARA WINDOWS/EXCEL (\r\n) ---
+                        csv_body = df_out.to_csv(index=False, sep=',', encoding='utf-8', line_terminator='\r\n')
+                        csv_data = f"sep=,\r\n{csv_body}"
+                        
                         zip_file.writestr(f"{nombre_carac}.csv", csv_data)
                         conteo_archivos += 1
                         
                 if conteo_archivos > 0:
-                    st.success(f"¡Éxito! Se han procesado y empaquetado {conteo_archivos} archivos de características listos para subir.")
+                    st.success(f"¡Éxito! Se han procesado y empaquetado {conteo_archivos} archivos de características.")
                     st.download_button(
                         label="📥 Descargar Pack Completo de Características (.zip)",
                         data=zip_buffer.getvalue(),
@@ -210,160 +184,99 @@ with tab1:
                         mime="application/zip"
                     )
                 else:
-                    st.error("No se pudo extraer información. Revisa los archivos de origen.")
+                    st.error("No se pudo extraer información compatible. Revisa la estructura de los archivos de origen.")
 
-# =========================================================================
-# SECCIÓN 2: CARGADOR DE PRECIOS (3 PLANTILLAS HORIZONTALES CON FILA COMBINADA)
-# =========================================================================
+
+# -------------------------------------------------------------------------
+# BLOQUE 2: CARGADOR GENERAL DE PRECIOS
+# -------------------------------------------------------------------------
 with tab2:
-    st.header("Generación del Fichero Maestro de Carga de Precios")
-    st.write("Genera las 3 plantillas independientes con la cabecera obligatoria unificada 'Herramientas'.")
+    st.header("Generación del Fichero de Carga General de Precios")
+    st.write("Genera el CSV estructurado requerido por la aplicación principal mapeando simultáneamente todos los canales internacionales y nacionales.")
+    
+    # Campo para ingresar de forma dinámica la tasa de cambio del Zloty Polaco (PLN)
+    tipo_cambio_pln = st.number_input("💵 Tipo de cambio actual (1 EUR a PLN):", min_value=0.01, value=4.32, step=0.01)
 
-    columnas_plantilla = [
-        'reference', 'price_france', 'price_italy', 'price_germany', 'price_portugal',
-        'price_spain', 'price_poland', 'price_holand', 'price_tradeinn_es', 'price_aliexpress_es',
-        'price_makro_es', 'price_mediamarkt_es', 'price_aurgi_es', 'price_elcorteingles_es',
-        'price_makro_de', 'price_makro_it', 'price_carrefour', 'price_pccomponentes'
-    ]
-
-    # Resolución de dataframes maestros iniciales
-    df_nac_base = next(iter(pestañas_nac.values())) if pestañas_nac else None
-
-    # Función común para inyectar la fila combinada "Herramientas" en un archivo Excel real (.xlsx)
-    def exportar_excel_con_cabecera_herramientas(df_datos):
-        output = io.BytesIO()
-        with pd.ExcelWriter(output, engine='openpyxl') as writer:
-            # Desplazar los encabezados reales a la fila 2 (startrow=1)
-            df_datos.to_excel(writer, sheet_name='Sheet1', index=False, startrow=1)
+    if st.button("🚀 Generar Fichero General de Precios (Cargador)"):
+        if not archivo_nac or not archivo_int:
+            st.error("Se necesitan los dos archivos cargados para realizar el cruce completo multicanal.")
+        else:
+            skus_totales = set()
+            df_nac_base = pestañas_nac.get("T_AMZ", next(iter(pestañas_nac.values())))
             
-            workbook = writer.book
-            worksheet = writer.sheets['Sheet1']
+            # Extraer el universo total de SKUs basándonos en la Columna A de T_AMZ
+            map_base_nac = extraer_precios_por_posicion(df_nac_base, idx_ref_nac, idx_ref_nac)
+            skus_totales.update(map_base_nac.keys())
+
+            # 2. Construcción de mapeos específicos por canal
+            # Canales Nacionales mapeados directamente contra la Columna P (índice 15) de T_AMZ
+            map_spain = extraer_precios_por_posicion(df_nac_base, idx_ref_nac, idx_pvp_nac)
+            map_pcc = map_spain
+            map_mm = map_spain
             
-            # Forzar el título "Herramientas" en la celda A1 y combinar hasta la columna R
-            worksheet['A1'] = "Herramientas"
-            worksheet.merge_cells(start_row=1, start_column=1, end_row=1, end_column=len(columnas_plantilla))
-            
-            from openpyxl.styles import Alignment, Font
-            worksheet['A1'].alignment = Alignment(horizontal='center', vertical='center')
-            worksheet['A1'].font = Font(bold=True, size=11)
-        return output.getvalue()
+            # Canales Internacionales
+            def buscar_y_extraer(lista_pestañas, col_ref, col_precio):
+                for p in lista_pestañas:
+                    if p in pestañas_int:
+                        return extraer_precios_por_posicion(pestañas_int[p], col_ref, col_precio)
+                return {}
 
-    col1, col2, col3 = st.columns(3)
+            map_fr = buscar_y_extraer(["FR-FR", "ES-FR"], 2, 12)
+            map_it = buscar_y_extraer(["IT-IT", "ES-IT"], 2, 12)
+            map_de = buscar_y_extraer(["DE-DE", "ES-DE"], 2, 12)
+            map_pt = buscar_y_extraer(["PT"], 2, 12)
+            map_nl = buscar_y_extraer(["NL"], 2, 12)
+            map_pl_eur = buscar_y_extraer(["PL"], 2, 13) # Devuelve originalmente en Euros
 
-    # ---------------------------------------------------------------------
-    # PLANTILLA 1: TARIFA NACIONAL ESPAÑA
-    # ---------------------------------------------------------------------
-    with col1:
-        st.subheader("1. Tarifa Nacional España")
-        st.caption("Actualiza columnas del ecosistema nacional usando los precios de la hoja de España.")
-        
-        if st.button("🚀 Generar Fichero 1 (Nacional)"):
-            if df_nac_base is not None:
-                # Buscar columnas de referencia y PVPR automáticamente
-                idx_ref_nac, idx_pvp_nac = 2, 4
-                for r_idx, row in df_nac_base.head(5).iterrows():
-                    row_strs = [str(item).strip().upper() for item in row]
-                    if "REFERENCIA" in row_strs: idx_ref_nac = row_strs.index("REFERENCIA")
-                    for idx, item in enumerate(row_strs):
-                        if "PVPR" in item: idx_pvp_nac = idx; break
-                
-                mapping_nac = extraer_precios_por_posicion(df_nac_base, idx_ref_nac, idx_pvp_nac)
-                
-                if mapping_nac:
-                    df_final = pd.DataFrame(columns=columnas_plantilla)
-                    df_final['reference'] = list(mapping_nac.keys())
-                    
-                    # Asignar los precios a todo el ecosistema nacional
-                    precios = list(mapping_nac.values())
-                    df_final['price_spain'] = precios
-                    df_final['price_tradeinn_es'] = precios
-                    df_final['price_aliexpress_es'] = precios
-                    df_final['price_mediamarkt_es'] = precios
-                    df_final['price_aurgi_es'] = precios
-                    df_final['price_carrefour'] = precios
-                    df_final['price_pccomponentes'] = precios
-                    
-                    # Rellenar las demás columnas con vacíos
-                    df_final = df_final.fillna("")
-                    
-                    bytes_excel = exportar_excel_con_cabecera_herramientas(df_final)
-                    st.success("✅ Fichero Nacional generado.")
-                    st.download_button(label="📥 Descargar Fichero 1", data=bytes_excel, file_name="1_Tarifa_Nacional_Espana.xlsx")
-            else:
-                st.warning("Por favor, carga primero la Tarifa Nacional en la barra lateral.")
+            # 3. Ensamblar la estructura final requerida de 19 columnas
+            filas_cargador = []
+            for sku in sorted(skus_totales):
+                # Aplicar conversión a Zlotis polacos (PLN) directamente
+                precio_pln = map_pl_eur.get(sku)
+                if precio_pln is not None:
+                    precio_pln = round(precio_pln * tipo_cambio_pln, 2)
 
-    # ---------------------------------------------------------------------
-    # PLANTILLA 2: TARIFA INTERNACIONAL PORTUGAL
-    # ---------------------------------------------------------------------
-    with col2:
-        st.subheader("2. Tarifa Internacional Portugal")
-        st.caption("Actualiza exclusivamente el precio correspondiente a la columna price_portugal.")
-        
-        if st.button("🚀 Generar Fichero 2 (Portugal)"):
-            df_pt = pestañas_int.get("PT")
-            if df_pt is not None:
-                # Extraer usando los índices fijos estipulados: Col C (2) y Col M (12)
-                mapping_pt = extraer_precios_por_posicion(df_pt, 2, 12)
-                
-                if mapping_pt:
-                    df_final = pd.DataFrame(columns=columnas_plantilla)
-                    df_final['reference'] = list(mapping_pt.keys())
-                    df_final['price_portugal'] = list(mapping_pt.values())
-                    df_final = df_final.fillna("")
-                    
-                    bytes_excel = exportar_excel_con_cabecera_herramientas(df_final)
-                    st.success("✅ Fichero de Portugal generado.")
-                    st.download_button(label="📥 Descargar Fichero 2", data=bytes_excel, file_name="2_Tarifa_Internacional_Portugal.xlsx")
-            else:
-                st.warning("No se encontró la pestaña 'PT' en el archivo Internacional.")
-
-    # ---------------------------------------------------------------------
-    # PLANTILLA 3: RESTO DE TARIFA INTERNACIONAL
-    # ---------------------------------------------------------------------
-    with col3:
-        st.subheader("3. Resto de Internacional")
-        st.caption("Unifica horizontalmente los precios de: Francia, Italia, Alemania, Países Bajos y Polonia.")
-        
-        if st.button("🚀 Generar Fichero 3 (Resto Int.)"):
-            if df_nac_base is not None and pestañas_int:
-                # Usamos los SKUs de la hoja nacional como lista maestra para consolidar Europa
-                idx_ref_nac = 2
-                for r_idx, row in df_nac_base.head(5).iterrows():
-                    if "REFERENCIA" in [str(i).strip().upper() for i in row]:
-                        idx_ref_nac = [str(i).strip().upper() for i in row].index("REFERENCIA")
-                        break
-                        
-                skus_maestros = [formatear_sku(x) for x in df_nac_base.iloc[:, idx_ref_nac].dropna() 
-                                 if str(x).strip().upper() not in ["REFERENCIA", "REFERENCE", "REF"]]
-                skus_maestros = [s for s in skus_maestros if s != ""]
-                
-                df_final = pd.DataFrame(columns=columnas_plantilla)
-                df_final['reference'] = list(set(skus_maestros)) # Remover duplicados de la lista base
-                
-                # Definición de mapeos de datos según tus reglas de extracción de columnas
-                # Estructura: columna_destino: (lista_posibles_pestañas, col_ref, col_precio)
-                mapeo_paises = {
-                    'price_france': (["FR-FR", "ES-FR"], 2, 12),  # Col C y M
-                    'price_italy': (["IT-IT", "ES-IT"], 2, 12),   # Col C y M
-                    'price_germany': (["DE-DE", "ES-DE"], 2, 12), # Col C y M
-                    'price_holand': (["NL"], 2, 12),               # Col C y M
-                    'price_poland': (["PL"], 2, 13)                # Col C y N (Polonia en Zlotis)
+                fila = {
+                    "reference": sku,
+                    "price_france": map_fr.get(sku, ""),
+                    "price_italy": map_it.get(sku, ""),
+                    "price_germany": map_de.get(sku, ""),
+                    "price_portugal": map_pt.get(sku, ""),
+                    "price_spain": map_spain.get(sku, ""),
+                    "price_poland": precio_pln if precio_pln else "",
+                    "price_holand": map_nl.get(sku, ""),
+                    "price_tradeinn_es": map_spain.get(sku, ""),
+                    "price_aliexpress_es": map_spain.get(sku, ""),
+                    "price_makro_es": map_spain.get(sku, ""),
+                    "price_mediamarkt_es": map_mm.get(sku, ""),
+                    "price_aurgi_es": map_spain.get(sku, ""),
+                    "price_elcorteingles_es": map_spain.get(sku, ""),
+                    "price_makro_de": map_de.get(sku, ""),
+                    "price_makro_it": map_it.get(sku, ""),
+                    "price_carrefour": map_spain.get(sku, ""),
+                    "price_pccomponentes": map_pcc.get(sku, ""),
+                    "Acción": ""
                 }
-                
-                for col_destino, (pestañas, idx_c, idx_p) in mapeo_paises.items():
-                    df_sheet = None
-                    for p in pestañas:
-                        if p in pestañas_int:
-                            df_sheet = pestañas_int[p]
-                            break
-                            
-                    if df_sheet is not None:
-                        dict_precios = extraer_precios_por_posicion(df_sheet, idx_c, idx_p)
-                        df_final[col_destino] = df_final['reference'].map(dict_precios)
-                
-                df_final = df_final.fillna("")
-                bytes_excel = exportar_excel_con_cabecera_herramientas(df_final)
-                st.success("✅ Fichero de Resto de Europa generado de forma unificada.")
-                st.download_button(label="📥 Descargar Fichero 3", data=bytes_excel, file_name="3_Resto_de_Internacional.xlsx")
-            else:
-                st.warning("Asegúrate de cargar ambos archivos maestros para consolidar el bloque internacional.")
+                filas_cargador.append(fila)
+
+            df_cargador = pd.DataFrame(filas_cargador)
+            
+            # Formatear columnas numéricas para forzar punto decimal limpio (.2f)
+            columnas_precios = [col for col in df_cargador.columns if col != "reference" and col != "Acción"]
+            for col in columnas_precios:
+                df_cargador[col] = df_cargador[col].apply(lambda x: f"{x:.2f}" if isinstance(x, (int, float)) else x)
+
+            # Mostrar vista previa en la interfaz
+            st.write("### Vista Previa del Fichero de Carga Generado")
+            st.dataframe(df_cargador.head(10))
+
+            # --- EXPORTACIÓN FINAL CON FORMATO INTEGRAL EXCEL WINDOWS ---
+            cargador_body = df_cargador.to_csv(index=False, sep=',', encoding='utf-8', line_terminator='\r\n')
+            cargador_csv_data = f"sep=,\r\n{cargador_body}"
+
+            st.download_button(
+                label="📥 Descargar Fichero General de Precios (.csv)",
+                data=cargador_csv_data,
+                file_name="CargadorGeneralPrecios_Procesado.csv",
+                mime="text/csv"
+            )
