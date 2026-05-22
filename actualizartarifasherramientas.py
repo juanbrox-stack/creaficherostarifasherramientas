@@ -69,10 +69,13 @@ def extraer_precios_por_posicion(df, col_ref_idx, col_precio_idx):
 def exportar_excel_con_cabecera_herramientas(df_datos, columnas_plantilla):
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        # Desplazar los encabezados reales a la fila 2 (startrow=1)
         df_datos.to_excel(writer, sheet_name='Sheet1', index=False, startrow=1)
+        
         workbook = writer.book
         worksheet = writer.sheets['Sheet1']
         
+        # Inyectar y combinar el encabezado estricto "Herramientas" en la fila 1
         worksheet['A1'] = "Herramientas"
         worksheet.merge_cells(start_row=1, start_column=1, end_row=1, end_column=len(columnas_plantilla))
         
@@ -80,8 +83,9 @@ def exportar_excel_con_cabecera_herramientas(df_datos, columnas_plantilla):
         worksheet['A1'].font = Font(bold=True, size=11)
     return output.getvalue()
 
+
 # =========================================================================
-# BARRA LATERAL - CARGA DE TARIFA NACIONAL E INTERNACIONAL
+# BARRA LATERAL - CARGA DE ARCHIVOS MAESTROS
 # =========================================================================
 st.sidebar.header("📂 Archivos Maestros de Origen")
 archivo_nac = st.sidebar.file_uploader("1. Tarifa Nacional (Excel)", type=["xlsx"])
@@ -107,6 +111,7 @@ if archivo_int:
         st.sidebar.success(f"Tarifa Internacional cargada ({len(pestañas_int)} pestañas)")
     except Exception as e:
         st.sidebar.error(f"Error al leer Tarifa Internacional: {e}")
+
 
 # =========================================================================
 # NÚCLEO DE LA APLICACIÓN - PESTAÑAS DE TRABAJO
@@ -159,7 +164,6 @@ with tab1:
             st.error("Por favor, asegúrate de subir ambos archivos maestros en la barra lateral.")
         else:
             diccionario_archivos = {}
-            df_nac_base = pestañas_nac.get("T_AMZ", next(iter(pestañas_nac.values())) if pestañas_nac else None)
             
             for nombre_carac, (tipo, posibles_pestañas, col_ref, col_precio) in reglas_caracteristicas.items():
                 df_trabajo = None
@@ -194,7 +198,7 @@ with tab1:
 
     if "archivos_caracteristicas" in st.session_state:
         archivos = st.session_state["archivos_caracteristicas"]
-        st.write("### ⬇ ... Descarga de Ficheros Individuales (.csv)")
+        st.write("### ⬇️ Descarga de Ficheros Individuales (.csv)")
         
         cols = st.columns(3)
         for idx, (nombre_fichero, datos_csv) in enumerate(archivos.items()):
@@ -222,116 +226,124 @@ with tab1:
             type="primary"
         )
 
+
 # -------------------------------------------------------------------------
-# BLOQUE 2: CARGADOR DE PRECIOS - SEPARACIÓN ESTRICTA EN 3 ARCHIVOS (.XLSX)
+# BLOQUE 2: CARGADOR DE PRECIOS - 3 ARCHIVOS INDEPENDIENTES Y OPCIÓN ZIP
 # -------------------------------------------------------------------------
 with tab2:
-    st.header("Generación del Cargador de Precios (3 Ficheros Independientes)")
-    st.write("Genera los 3 archivos separados con formato **Excel (.xlsx)** y la primera fila combinada como **'Herramientas'**.")
+    st.header("Generación del Cargador de Precios")
+    st.write("Presiona el botón para procesar y construir los archivos correspondientes a las tarifas horizontales.")
 
     tipo_cambio_pln = st.number_input("💵 Tipo de cambio manual (1 EUR a PLN - Polonia):", min_value=0.01, value=4.32, step=0.01)
     
-    col1, col2, col3 = st.columns(3)
-    df_amz = pestañas_nac.get("T_AMZ")
+    # Botón maestro para ejecutar toda la lógica horizontal de golpe de forma segura
+    if st.button("🚀 Procesar y Preparar Ficheros del Cargador"):
+        df_amz = pestañas_nac.get("T_AMZ")
+        
+        if not archivo_nac or not archivo_int or df_amz is None:
+            st.error("Asegúrate de subir ambos archivos y que el Nacional contenga la pestaña 'T_AMZ'.")
+        else:
+            # --- PROCESAMIENTO FICHERO 1: ESPAÑA ---
+            map_amz = extraer_precios_por_posicion(df_amz, 0, 15)
+            map_mir = extraer_precios_por_posicion(pestañas_nac.get("T_MIR"), 0, 15)
+            map_mm = extraer_precios_por_posicion(pestañas_nac.get("T_MM"), 0, 15)
+            map_c4 = extraer_precios_por_posicion(pestañas_nac.get("T_C4"), 0, 15)
+            
+            df_f1 = pd.DataFrame(columns=columnas_plantilla)
+            df_f1['reference'] = list(map_amz.keys())
+            df_f1['price_spain'] = df_f1['reference'].map(map_amz)
+            df_f1['price_tradeinn_es'] = df_f1['reference'].map(map_amz)
+            df_f1['price_aliexpress_es'] = df_f1['reference'].map(map_mir)
+            df_f1['price_mediamarkt_es'] = df_f1['reference'].map(map_mm)
+            df_f1['price_aurgi_es'] = df_f1['reference'].map(map_amz)
+            df_f1['price_carrefour'] = df_f1['reference'].map(map_c4)
+            df_f1['price_pccomponentes'] = df_f1['reference'].map(map_mm)
+            df_f1 = df_f1.fillna("")
+            for c in columnas_plantilla:
+                if c != 'reference': df_f1[c] = df_f1[c].apply(lambda x: f"{x:.2f}" if isinstance(x, (int, float)) else x)
+            
+            bytes_f1 = exportar_excel_con_cabecera_herramientas(df_f1, columnas_plantilla)
+            st.session_state["bytes_cargador_f1"] = bytes_f1
 
-    # --- FICHERO 1: TARIFA NACIONAL ESPAÑA ---
-    with col1:
-        st.subheader("1. Tarifa Nacional España")
-        st.caption("Pobla los canales nacionales desde sus respectivas pestañas del Excel Nacional (Col A y Col P).")
-        if st.button("🚀 Generar Fichero 1 (Nacional)"):
-            if df_amz is not None:
-                map_amz = extraer_precios_por_posicion(df_amz, 0, 15)
-                map_mir = extraer_precios_por_posicion(pestañas_nac.get("T_MIR"), 0, 15)
-                map_mm = extraer_precios_por_posicion(pestañas_nac.get("T_MM"), 0, 15)
-                map_c4 = extraer_precios_por_posicion(pestañas_nac.get("T_C4"), 0, 15)
-                
-                df_final = pd.DataFrame(columns=columnas_plantilla)
-                df_final['reference'] = list(map_amz.keys())
-                
-                df_final['price_spain'] = df_final['reference'].map(map_amz)
-                df_final['price_tradeinn_es'] = df_final['reference'].map(map_amz)
-                df_final['price_aliexpress_es'] = df_final['reference'].map(map_mir)
-                df_final['price_mediamarkt_es'] = df_final['reference'].map(map_mm)
-                df_final['price_aurgi_es'] = df_final['reference'].map(map_amz)
-                df_final['price_carrefour'] = df_final['reference'].map(map_c4)
-                df_final['price_pccomponentes'] = df_final['reference'].map(map_mm)
-                
-                df_final = df_final.fillna("")
-                
-                for c in columnas_plantilla:
-                    if c != 'reference':
-                        df_final[c] = df_final[c].apply(lambda x: f"{x:.2f}" if isinstance(x, (int, float)) else x)
-                        
-                bytes_excel = exportar_excel_con_cabecera_herramientas(df_final, columnas_plantilla)
-                st.success("✅ Fichero 1 Nacional preparado.")
-                st.download_button(label="📥 Descargar Tarifa Nacional", data=bytes_excel, file_name="1_Tarifa_Nacional_Espana.xlsx")
-            else:
-                st.warning("Asegúrate de cargar la Tarifa Nacional que contenga la pestaña 'T_AMZ'.")
-
-    # --- FICHERO 2: TARIFA INTERNACIONAL PORTUGAL ---
-    with col2:
-        st.subheader("2. Tarifa Internacional Portugal")
-        st.caption("Pobla de forma aislada la columna price_portugal (Pestaña 'PT' - Col C y Col M).")
-        if st.button("🚀 Generar Fichero 2 (Portugal)"):
+            # --- PROCESAMIENTO FICHERO 2: PORTUGAL ---
             df_pt = pestañas_int.get("PT")
+            bytes_f2 = None
             if df_pt is not None:
                 map_pt = extraer_precios_por_posicion(df_pt, 2, 12)
-                
-                if map_pt:
-                    df_final = pd.DataFrame(columns=columnas_plantilla)
-                    df_final['reference'] = list(map_pt.keys())
-                    df_final['price_portugal'] = list(map_pt.values())
-                    
-                    df_final = df_final.fillna("")
-                    for c in columnas_plantilla:
-                        if c != 'reference':
-                            df_final[c] = df_final[c].apply(lambda x: f"{x:.2f}" if isinstance(x, (int, float)) else x)
-                            
-                    bytes_excel = exportar_excel_con_cabecera_herramientas(df_final, columnas_plantilla)
-                    st.success("✅ Fichero 2 Portugal preparado.")
-                    st.download_button(label="📥 Descargar Tarifa Portugal", data=bytes_excel, file_name="2_Tarifa_Internacional_Portugal.xlsx")
-            else:
-                st.warning("No se encontró la pestaña 'PT' en el archivo maestro Internacional.")
-
-    # --- FICHERO 3: RESTO DE TARIFA INTERNACIONAL ---
-    with col3:
-        st.subheader("3. Resto de Internacional")
-        st.caption("Consolida horizontalmente Francia, Italia, Alemania (Hojas ES-), Holanda (NL) y Polonia (PL en PLN).")
-        if st.button("🚀 Generar Fichero 3 (Resto Int.)"):
-            if df_amz is not None and pestañas_int:
-                map_base_nac = extraer_precios_por_posicion(df_amz, 0, 0)
-                
-                df_final = pd.DataFrame(columns=columnas_plantilla)
-                df_final['reference'] = list(map_base_nac.keys())
-                
-                def buscar_y_extraer(lista_pestañas, col_ref, col_precio):
-                    for p in lista_pestañas:
-                        if p in pestañas_int:
-                            return extraer_precios_por_posicion(pestañas_int[p], col_ref, col_precio)
-                    return {}
-
-                map_fr = buscar_y_extraer(["ES-FR", "FR-FR"], 2, 12)
-                map_it = buscar_y_extraer(["ES-IT", "IT-IT"], 2, 12)
-                map_de = buscar_y_extraer(["ES-DE", "DE-DE"], 2, 12)
-                map_nl = buscar_y_extraer(["NL"], 2, 12)
-                map_pl_eur = buscar_y_extraer(["PL"], 2, 13)
-
-                df_final['price_france'] = df_final['reference'].map(map_fr)
-                df_final['price_italy'] = df_final['reference'].map(map_it)
-                df_final['price_germany'] = df_final['reference'].map(map_de)
-                df_final['price_holand'] = df_final['reference'].map(map_nl)
-                
-                df_final['price_poland'] = df_final['reference'].map(map_pl_eur).apply(
-                    lambda x: round(x * tipo_cambio_pln, 2) if x is not None else None
-                )
-                
-                df_final = df_final.fillna("")
+                df_f2 = pd.DataFrame(columns=columnas_plantilla)
+                df_f2['reference'] = list(map_pt.keys())
+                df_f2['price_portugal'] = list(map_pt.values())
+                df_f2 = df_f2.fillna("")
                 for c in columnas_plantilla:
-                    if c != 'reference':
-                        df_final[c] = df_final[c].apply(lambda x: f"{x:.2f}" if isinstance(x, (int, float)) else x)
-                        
-                bytes_excel = exportar_excel_con_cabecera_herramientas(df_final, columnas_plantilla)
-                st.success("✅ Fichero 3 Resto de Internacional preparado.")
-                st.download_button(label="📥 Descargar Fichero Resto Europa", data=bytes_excel, file_name="3_Resto_de_Internacional.xlsx")
+                    if c != 'reference': df_f2[c] = df_f2[c].apply(lambda x: f"{x:.2f}" if isinstance(x, (int, float)) else x)
+                bytes_f2 = exportar_excel_con_cabecera_herramientas(df_f2, columnas_plantilla)
+                st.session_state["bytes_cargador_f2"] = bytes_f2
+
+            # --- PROCESAMIENTO FICHERO 3: RESTO EUROPA ---
+            map_base_nac = extraer_precios_por_posicion(df_amz, 0, 0)
+            df_f3 = pd.DataFrame(columns=columnas_plantilla)
+            df_f3['reference'] = list(map_base_nac.keys())
+            
+            def buscar_y_extraer(lista_pestañas, col_ref, col_precio):
+                for p in lista_pestañas:
+                    if p in pestañas_int: return extraer_precios_por_posicion(pestañas_int[p], col_ref, col_precio)
+                return {}
+
+            map_fr = buscar_y_extraer(["ES-FR", "FR-FR"], 2, 12)
+            map_it = buscar_y_extraer(["ES-IT", "IT-IT"], 2, 12)
+            map_de = buscar_y_extraer(["ES-DE", "DE-DE"], 2, 12)
+            map_nl = buscar_y_extraer(["NL"], 2, 12)
+            map_pl_eur = buscar_y_extraer(["PL"], 2, 13)
+
+            df_f3['price_france'] = df_f3['reference'].map(map_fr)
+            df_f3['price_italy'] = df_f3['reference'].map(map_it)
+            df_f3['price_germany'] = df_f3['reference'].map(map_de)
+            df_f3['price_holand'] = df_f3['reference'].map(map_nl)
+            df_f3['price_poland'] = df_f3['reference'].map(map_pl_eur).apply(lambda x: round(x * tipo_cambio_pln, 2) if x is not None else None)
+            df_f3 = df_f3.fillna("")
+            for c in columnas_plantilla:
+                if c != 'reference': df_f3[c] = df_f3[c].apply(lambda x: f"{x:.2f}" if isinstance(x, (int, float)) else x)
+            
+            bytes_f3 = exportar_excel_con_cabecera_herramientas(df_f3, columnas_plantilla)
+            st.session_state["bytes_cargador_f3"] = bytes_f3
+            
+            st.success("✅ ¡Los 3 archivos del cargador se han procesado correctamente!")
+
+    # Despliegue de los botones de descarga de forma condicional si están listos en la sesión
+    if "bytes_cargador_f1" in st.session_state:
+        st.write("### ⬇️ Descarga de Plantillas Horizontales (.xlsx)")
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            st.subheader("1. Tarifa Nacional España")
+            st.download_button(label="📥 Descargar Tarifa Nacional", data=st.session_state["bytes_cargador_f1"], file_name="1_Tarifa_Nacional_Espana.xlsx")
+            
+        with col2:
+            st.subheader("2. Tarifa Internacional Portugal")
+            if st.session_state["bytes_cargador_f2"] is not None:
+                st.download_button(label="📥 Descargar Tarifa Portugal", data=st.session_state["bytes_cargador_f2"], file_name="2_Tarifa_Internacional_Portugal.xlsx")
             else:
-                st.warning("Carga la Tarifa Nacional (T_AMZ) e Internacional para poder realizar el cruce unificado.")
+                st.caption("No se generaron datos para Portugal.")
+                
+        with col3:
+            st.subheader("3. Resto de Internacional")
+            st.download_button(label="📥 Descargar Tarifa Resto Europa", data=st.session_state["bytes_cargador_f3"], file_name="3_Resto_de_Internacional.xlsx")
+            
+        # --- NUEVA OPERATORIA: BOTÓN DE DESCARGA CONJUNTA ZIP ---
+        st.write("---")
+        st.write("### 🗜️ Opción de Descarga Conjunta del Cargador")
+        
+        zip_cargador_buffer = io.BytesIO()
+        with zipfile.ZipFile(zip_cargador_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+            zf.writestr("1_Tarifa_Nacional_Espana.xlsx", st.session_state["bytes_cargador_f1"])
+            if st.session_state["bytes_cargador_f2"] is not None:
+                zf.writestr("2_Tarifa_Internacional_Portugal.xlsx", st.session_state["bytes_cargador_f2"])
+            zf.writestr("3_Resto_de_Internacional.xlsx", st.session_state["bytes_cargador_f3"])
+            
+        st.download_button(
+            label="📦 Descargar los 3 archivos del Cargador juntos (.ZIP)",
+            data=zip_cargador_buffer.getvalue(),
+            file_name="cargador_tarifas_completo.zip",
+            mime="application/zip",
+            type="primary"
+        )
