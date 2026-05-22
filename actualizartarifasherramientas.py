@@ -17,15 +17,15 @@ def formatear_sku(val):
     if val_str.endswith('.0'):
         val_str = val_str[:-2]
     
-    # Si contiene letras en cualquier posición (ej: A01, A90, V0416), se mantiene idéntico 
+    # Si contiene letras en cualquier posición (ej: A01, A90, V0416), se mantiene idéntico
     if any(c.isalpha() for c in val_str):
         return val_str
         
-    # Extraer solo los dígitos numéricos en caso de espacios o caracteres raros
+    # Extraer solo los dígitos numéricos
     num_str = "".join(c for c in val_str if c.isdigit())
     if num_str:
-        # Rellenar con ceros a la izquierda hasta un formato estándar de 5 dígitos para TODOS 
-        # (Esto cubre el 112 -> 00112 y los de 4 dígitos como 1503 -> 01503) 
+        # Rellenar con ceros a la izquierda hasta un formato estándar de 5 dígitos para TODOS
+        # (Cubre el 112 -> 00112 y los de 4 dígitos como 1503 -> 01503)
         return num_str.zfill(5)
         
     return val_str
@@ -71,10 +71,31 @@ def extraer_precios_por_posicion(df, col_ref_idx, col_precio_idx):
         mapping[sku] = precio_val
     return mapping
 
+def exportar_caracteristica_excel(df_datos, nombre_caracteristica):
+    """
+    Genera los archivos del Bloque 1 en formato .xlsx real con columnas 'sku' y 'valor'
+    forzando la columna 'sku' a formato de texto para que no se pierdan los ceros.
+    """
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        df_datos.to_excel(writer, sheet_name='Sheet1', index=False)
+        
+        workbook = writer.book
+        worksheet = writer.sheets['Sheet1']
+        
+        # Forzar formato texto (@) en la columna A (SKU) para mantener los ceros a la izquierda
+        for row in range(2, worksheet.max_row + 1):
+            cell = worksheet.cell(row=row, column=1)
+            if cell.value is not None:
+                cell.number_format = '@'
+                cell.value = str(cell.value)
+                
+    return output.getvalue()
+
 def exportar_excel_con_cabecera_herramientas(df_datos, columnas_plantilla):
     """
-    Genera un archivo .xlsx real con la fila 1 combinada como 'Herramientas'
-    y fuerza la columna 'reference' a formato TEXTO para que Excel no borre los ceros.
+    Genera un archivo .xlsx real para el Bloque 2 con la fila 1 combinada como 'Herramientas'
+    y fuerza la columna 'reference' a formato TEXTO para retener los ceros.
     """
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
@@ -90,13 +111,12 @@ def exportar_excel_con_cabecera_herramientas(df_datos, columnas_plantilla):
         worksheet['A1'].alignment = Alignment(horizontal='center', vertical='center')
         worksheet['A1'].font = Font(bold=True, size=11)
         
-        # --- SOLUCIÓN PARA EVITAR QUE EXCEL BORRE LOS CEROS AL INICIO ---
-        # Forzamos que toda la columna A (a partir de la fila 3 que es donde empiezan los SKUs) sea formato Texto ('@')
+        # Forzamos que toda la columna A (a partir de la fila 3) sea formato Texto ('@')
         for row in range(3, worksheet.max_row + 1):
             cell = worksheet.cell(row=row, column=1)
             if cell.value is not None:
-                cell.number_format = '@'  # Establece formato de Texto explícito
-                cell.value = str(cell.value)  # Asegura que se guarde como cadena
+                cell.number_format = '@'
+                cell.value = str(cell.value)
                 
     return output.getvalue()
 
@@ -147,11 +167,11 @@ columnas_plantilla = [
 ]
 
 # -------------------------------------------------------------------------
-# BLOQUE 1: PROCESAMIENTO MASIVO POR CARACTERÍSTICAS
+# BLOQUE 1: PROCESAMIENTO MASIVO POR CARACTERÍSTICAS (.XLSX)
 # -------------------------------------------------------------------------
 with tab1:
     st.header("Generación Masiva por Características")
-    st.write("Genera los archivos individuales organizados y limpios para el módulo 'Actualizador de Características'.")
+    st.write("Genera los archivos individuales organizados y limpios en formato **Excel (.xlsx)** para el módulo 'Actualizador de Características'.")
 
     reglas_caracteristicas = {
         "PVP_LEROYES": ("Nacional", ["T_AMZ"], idx_ref_nac, idx_pvp_nac), 
@@ -203,42 +223,42 @@ with tab1:
                     df_out = pd.DataFrame(list(mapping_precios.items()), columns=['sku', 'valor'])
                     df_out['valor'] = df_out['valor'].apply(lambda x: "{:.2f}".format(x) if x is not None else "")
                     
-                    csv_body = df_out.to_csv(index=False, sep=',', encoding='utf-8', lineterminator='\r\n')
-                    csv_data = f"sep=,\r\n{csv_body}"
-                    diccionario_archivos[nombre_carac] = csv_data
+                    # Generar binario del archivo Excel (.xlsx) aplicando formato Texto a la columna A
+                    bytes_carac_excel = exportar_caracteristica_excel(df_out, nombre_carac)
+                    diccionario_archivos[nombre_carac] = bytes_carac_excel
 
             if diccionario_archivos:
                 st.session_state["archivos_caracteristicas"] = diccionario_archivos
-                st.success(f"¡Procesamiento completo! {len(diccionario_archivos)} características preparadas.")
+                st.success(f"¡Procesamiento completo! {len(diccionario_archivos)} archivos de características preparados.")
             else:
                 st.error("No se pudo extraer información. Revisa la estructura de los archivos.")
 
     if "archivos_caracteristicas" in st.session_state:
         archivos = st.session_state["archivos_caracteristicas"]
-        st.write("### ⬇️ Descarga de Ficheros Individuales (.csv)")
+        st.write("### ⬇️ Descarga de Ficheros Individuales (.xlsx)")
         
         cols = st.columns(3)
-        for idx, (nombre_fichero, datos_csv) in enumerate(archivos.items()):
+        for idx, (nombre_fichero, datos_excel) in enumerate(archivos.items()):
             col_actual = cols[idx % 3]
             with col_actual:
                 st.download_button(
-                    label=f"📄 {nombre_fichero}.csv",
-                    data=datos_csv,
-                    file_name=f"{nombre_fichero}.csv",
-                    mime="text/csv",
+                    label=f"📊 {nombre_fichero}.xlsx",
+                    data=datos_excel,
+                    file_name=f"{nombre_fichero}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     key=f"btn_{nombre_fichero}"
                 )
         
         st.write("---")
         zip_buffer = io.BytesIO()
         with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
-            for nombre_fichero, datos_csv in archivos.items():
-                zip_file.writestr(f"{nombre_fichero}.csv", datos_csv)
+            for nombre_fichero, datos_excel in archivos.items():
+                zip_file.writestr(f"{nombre_fichero}.xlsx", datos_excel)
                 
         st.download_button(
             label="📥 Descargar TODOS los archivos de Características (.ZIP)",
             data=zip_buffer.getvalue(),
-            file_name="caracteristicas_actualizadas.zip",
+            file_name="caracteristicas_actualizadas_excel.zip",
             mime="application/zip",
             type="primary"
         )
