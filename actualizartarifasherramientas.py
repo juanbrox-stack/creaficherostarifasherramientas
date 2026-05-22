@@ -17,12 +17,17 @@ def formatear_sku(val):
     if val_str.endswith('.0'):
         val_str = val_str[:-2]
     
-    if val_str.isdigit():
-        num_int = int(val_str)
-        if num_int < 120:
-            return f"{num_int:03d}"
-        else:
-            return f"{num_int:05d}"
+    # Si contiene letras en cualquier posición (ej: A01, A90, V0416), se mantiene idéntico 
+    if any(c.isalpha() for c in val_str):
+        return val_str
+        
+    # Extraer solo los dígitos numéricos en caso de espacios o caracteres raros
+    num_str = "".join(c for c in val_str if c.isdigit())
+    if num_str:
+        # Rellenar con ceros a la izquierda hasta un formato estándar de 5 dígitos para TODOS 
+        # (Esto cubre el 112 -> 00112 y los de 4 dígitos como 1503 -> 01503) 
+        return num_str.zfill(5)
+        
     return val_str
 
 def limpiar_y_convertir_precio(val):
@@ -67,9 +72,12 @@ def extraer_precios_por_posicion(df, col_ref_idx, col_precio_idx):
     return mapping
 
 def exportar_excel_con_cabecera_herramientas(df_datos, columnas_plantilla):
+    """
+    Genera un archivo .xlsx real con la fila 1 combinada como 'Herramientas'
+    y fuerza la columna 'reference' a formato TEXTO para que Excel no borre los ceros.
+    """
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
-        # Desplazar los encabezados reales a la fila 2 (startrow=1)
         df_datos.to_excel(writer, sheet_name='Sheet1', index=False, startrow=1)
         
         workbook = writer.book
@@ -81,6 +89,15 @@ def exportar_excel_con_cabecera_herramientas(df_datos, columnas_plantilla):
         
         worksheet['A1'].alignment = Alignment(horizontal='center', vertical='center')
         worksheet['A1'].font = Font(bold=True, size=11)
+        
+        # --- SOLUCIÓN PARA EVITAR QUE EXCEL BORRE LOS CEROS AL INICIO ---
+        # Forzamos que toda la columna A (a partir de la fila 3 que es donde empiezan los SKUs) sea formato Texto ('@')
+        for row in range(3, worksheet.max_row + 1):
+            cell = worksheet.cell(row=row, column=1)
+            if cell.value is not None:
+                cell.number_format = '@'  # Establece formato de Texto explícito
+                cell.value = str(cell.value)  # Asegura que se guarde como cadena
+                
     return output.getvalue()
 
 
@@ -236,7 +253,6 @@ with tab2:
 
     tipo_cambio_pln = st.number_input("💵 Tipo de cambio manual (1 EUR a PLN - Polonia):", min_value=0.01, value=4.32, step=0.01)
     
-    # Botón maestro para ejecutar toda la lógica horizontal de golpe de forma segura
     if st.button("🚀 Procesar y Preparar Ficheros del Cargador"):
         df_amz = pestañas_nac.get("T_AMZ")
         
@@ -309,7 +325,6 @@ with tab2:
             
             st.success("✅ ¡Los 3 archivos del cargador se han procesado correctamente!")
 
-    # Despliegue de los botones de descarga de forma condicional si están listos en la sesión
     if "bytes_cargador_f1" in st.session_state:
         st.write("### ⬇️ Descarga de Plantillas Horizontales (.xlsx)")
         col1, col2, col3 = st.columns(3)
@@ -329,7 +344,6 @@ with tab2:
             st.subheader("3. Resto de Internacional")
             st.download_button(label="📥 Descargar Tarifa Resto Europa", data=st.session_state["bytes_cargador_f3"], file_name="3_Resto_de_Internacional.xlsx")
             
-        # --- NUEVA OPERATORIA: BOTÓN DE DESCARGA CONJUNTA ZIP ---
         st.write("---")
         st.write("### 🗜️ Opción de Descarga Conjunta del Cargador")
         
