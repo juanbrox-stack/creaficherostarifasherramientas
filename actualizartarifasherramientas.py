@@ -156,8 +156,10 @@ if archivo_int:
 st.title("⚙️ Sistema Automatizado de Control de Tarifas - Turaco")
 tab1, tab2 = st.tabs(["📦 Bloque 1: Características", "🚀 Bloque 2: Cargador de Precios (3 Ficheros)"])
 
-idx_ref_nac = 0
-idx_pvp_nac = 15
+# Índices para la Tarifa Nacional (T_AMZ / T_MM / T_MIR / T_C4)
+idx_ref_nac = 0   # Columna A
+idx_pvp_nac = 15  # Columna P (PVP PUB)
+idx_mm_pub = 16   # Columna Q (PVP PUB para MediaMarkt / PcComponentes)
 
 columnas_plantilla = [
     'reference', 'price_france', 'price_italy', 'price_germany', 'price_portugal',
@@ -174,25 +176,34 @@ with tab1:
     st.write("Genera los archivos individuales organizados y limpios en formato **Excel (.xlsx)** para el módulo 'Actualizador de Características'.")
 
     reglas_caracteristicas = {
+        # España (Tarifa Nacional)
         "PVP_LEROYES": ("Nacional", ["T_AMZ"], idx_ref_nac, idx_pvp_nac), 
-        "PVP_PcComponentes": ("Nacional", ["T_MM"], idx_ref_nac, idx_pvp_nac),
+        "PVP_PcComponentes": ("Nacional", ["T_MM"], idx_ref_nac, idx_mm_pub), # Cambiado a columna Q (index 16)
         "PVPR": ("Nacional", ["T_AMZ"], idx_ref_nac, idx_pvp_nac),
         "PVP ESPANA": ("Nacional", ["T_AMZ"], idx_ref_nac, idx_pvp_nac),
-        "Pvp mediamarkt es": ("Nacional", ["T_MM"], idx_ref_nac, idx_pvp_nac),
+        "Pvp mediamarkt es": ("Nacional", ["T_MM"], idx_ref_nac, idx_mm_pub), # Cambiado a columna Q (index 16)
         "PVP_SHEIN_ES": ("Nacional", ["T_AMZ"], idx_ref_nac, idx_pvp_nac),
+        # Francia
         "Prix_France": ("Internacional", ["ES-FR", "FR-FR"], 2, 12),
         "PVP_SHEIN_FR": ("Internacional", ["ES-FR", "FR-FR"], 2, 12),
+        # Italia
         "Prix_Italia": ("Internacional", ["ES-IT", "IT-IT"], 2, 12),
         "PVP_SHEIN_IT": ("Internacional", ["ES-IT", "IT-IT"], 2, 12),
+        # Alemania
         "prix_Alemania": ("Internacional", ["ES-DE", "DE-DE"], 2, 12),
         "PVP_SHEIN_DE": ("Internacional", ["ES-DE", "DE-DE"], 2, 12),
+        # Portugal
         "PVP_SHEIN_PT": ("Internacional", ["PT"], 2, 12),
         "PVP PORTUGAL": ("Internacional", ["PT"], 2, 12),
+        # Bélgica
         "PVP_BE": ("Internacional", ["BE"], 2, 12),
+        # Países Bajos
         "PRIXHOLANDA": ("Internacional", ["NL"], 2, 12),
         "PVP_SHEIN_NL": ("Internacional", ["NL"], 2, 12),
+        # Polonia (Columna N = index 13)
         "PVP_SHEIN_PL": ("Internacional", ["PL"], 2, 13),
         "PRIX_POLONIA": ("Internacional", ["PL"], 2, 13),
+        # Suecia (Columna N = index 13)
         "PVP Suecia": ("Internacional", ["SE"], 2, 13)
     }
 
@@ -223,7 +234,6 @@ with tab1:
                     df_out = pd.DataFrame(list(mapping_precios.items()), columns=['sku', 'valor'])
                     df_out['valor'] = df_out['valor'].apply(lambda x: "{:.2f}".format(x) if x is not None else "")
                     
-                    # Generar binario del archivo Excel (.xlsx) aplicando formato Texto a la columna A
                     bytes_carac_excel = exportar_caracteristica_excel(df_out, nombre_carac)
                     diccionario_archivos[nombre_carac] = bytes_carac_excel
 
@@ -270,8 +280,6 @@ with tab1:
 with tab2:
     st.header("Generación del Cargador de Precios")
     st.write("Presiona el botón para procesar y construir los archivos correspondientes a las tarifas horizontales.")
-
-    tipo_cambio_pln = st.number_input("💵 Tipo de cambio manual (1 EUR a PLN - Polonia):", min_value=0.01, value=4.32, step=0.01)
     
     if st.button("🚀 Procesar y Preparar Ficheros del Cargador"):
         df_amz = pestañas_nac.get("T_AMZ")
@@ -280,10 +288,10 @@ with tab2:
             st.error("Asegúrate de subir ambos archivos y que el Nacional contenga la pestaña 'T_AMZ'.")
         else:
             # --- PROCESAMIENTO FICHERO 1: ESPAÑA ---
-            map_amz = extraer_precios_por_posicion(df_amz, 0, 15)
-            map_mir = extraer_precios_por_posicion(pestañas_nac.get("T_MIR"), 0, 15)
-            map_mm = extraer_precios_por_posicion(pestañas_nac.get("T_MM"), 0, 15)
-            map_c4 = extraer_precios_por_posicion(pestañas_nac.get("T_C4"), 0, 15)
+            map_amz = extraer_precios_por_posicion(df_amz, 0, idx_pvp_nac)
+            map_mir = extraer_precios_por_posicion(pestañas_nac.get("T_MIR"), 0, idx_pvp_nac)
+            map_mm = extraer_precios_por_posicion(pestañas_nac.get("T_MM"), 0, idx_mm_pub) # Cambiado a columna Q (index 16)
+            map_c4 = extraer_precios_por_posicion(pestañas_nac.get("T_C4"), 0, idx_pvp_nac)
             
             df_f1 = pd.DataFrame(columns=columnas_plantilla)
             df_f1['reference'] = list(map_amz.keys())
@@ -329,13 +337,13 @@ with tab2:
             map_it = buscar_y_extraer(["ES-IT", "IT-IT"], 2, 12)
             map_de = buscar_y_extraer(["ES-DE", "DE-DE"], 2, 12)
             map_nl = buscar_y_extraer(["NL"], 2, 12)
-            map_pl_eur = buscar_y_extraer(["PL"], 2, 13)
+            map_pl_zlotis = buscar_y_extraer(["PL"], 2, 13) # Lee columna N, que ya viene nativa en Zlotis
 
             df_f3['price_france'] = df_f3['reference'].map(map_fr)
             df_f3['price_italy'] = df_f3['reference'].map(map_it)
             df_f3['price_germany'] = df_f3['reference'].map(map_de)
             df_f3['price_holand'] = df_f3['reference'].map(map_nl)
-            df_f3['price_poland'] = df_f3['reference'].map(map_pl_eur).apply(lambda x: round(x * tipo_cambio_pln, 2) if x is not None else None)
+            df_f3['price_poland'] = df_f3['reference'].map(map_pl_zlotis) # Mapeo directo sin multiplicadores
             df_f3 = df_f3.fillna("")
             for c in columnas_plantilla:
                 if c != 'reference': df_f3[c] = df_f3[c].apply(lambda x: f"{x:.2f}" if isinstance(x, (int, float)) else x)
@@ -343,7 +351,7 @@ with tab2:
             bytes_f3 = exportar_excel_con_cabecera_herramientas(df_f3, columnas_plantilla)
             st.session_state["bytes_cargador_f3"] = bytes_f3
             
-            st.success("✅ ¡Los 3 archivos del cargador se han procesado correctamente!")
+            st.success("¡Los 3 archivos del cargador se han procesado correctamente!")
 
     if "bytes_cargador_f1" in st.session_state:
         st.write("### ⬇️ Descarga de Plantillas Horizontales (.xlsx)")
