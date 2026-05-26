@@ -280,9 +280,9 @@ with tab1:
         )
 
 
-# -------------------------------------------------------------------------
+# =========================================================================
 # BLOQUE 2: CARGADOR DE PRECIOS - 3 ARCHIVOS INDEPENDIENTES Y OPCIÓN ZIP
-# -------------------------------------------------------------------------
+# =========================================================================
 with tab2:
     st.header("Generación del Cargador de Precios")
     st.write("Presiona el botón para procesar las tarifas horizontales. Los registros con todos los precios vacíos se eliminarán automáticamente de los 3 ficheros.")
@@ -309,7 +309,7 @@ with tab2:
             df_f1['price_carrefour'] = df_f1['reference'].map(map_c4)
             df_f1['price_pccomponentes'] = df_f1['reference'].map(map_mm)
             
-            # --- LIMPIEZA ESTRICTA: BORRAR SKU SI TODO ESTÁ EN BLANCO ---
+            # --- CORRECCIÓN CRÍTICA DE FILTRADO UBICADO TRAS EL MAPEO ---
             df_f1 = df_f1.dropna(subset=columnas_de_precio_totales, how='all')
             
             df_f1 = df_f1.fillna("")
@@ -329,7 +329,7 @@ with tab2:
                 df_f2['reference'] = list(map_pt.keys())
                 df_f2['price_portugal'] = list(map_pt.values())
                 
-                # --- LIMPIEZA ESTRICTA: BORRAR SKU SI TODO ESTÁ EN BLANCO ---
+                # --- CORRECCIÓN CRÍTICA DE FILTRADO UBICADO TRAS EL MAPEO ---
                 df_f2 = df_f2.dropna(subset=columnas_de_precio_totales, how='all')
                 
                 df_f2 = df_f2.fillna("")
@@ -360,7 +360,7 @@ with tab2:
             df_f3['price_holand'] = df_f3['reference'].map(map_nl)
             df_f3['price_poland'] = df_f3['reference'].map(map_pl_zlotis)
             
-            # --- LIMPIEZA ESTRICTA: BORRAR SKU SI TODO ESTÁ EN BLANCO ---
+            # --- CORRECCIÓN CRÍTICA DE FILTRADO UBICADO TRAS EL MAPEO ---
             df_f3 = df_f3.dropna(subset=columnas_de_precio_totales, how='all')
             
             df_f3 = df_f3.fillna("")
