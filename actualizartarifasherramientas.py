@@ -52,7 +52,7 @@ def extraer_precios_por_posicion(df, col_ref_idx, col_precio_idx):
             continue
             
         ref_raw = str(row.iloc[col_ref_idx]).strip()
-        if ref_raw.upper() in ["REFERENCIA", "SKU", "NOMBRE COMPLETO", "REFERENCE", "REF", ""]:
+        if ref_raw.upper() in ["REFERENCIA", "REFERENC", "SKU", "NOMBRE COMPLETO", "REFERENCE", "REF", ""]:
             continue
             
         sku = formatear_sku(ref_raw)
@@ -120,7 +120,6 @@ archivo_int = st.sidebar.file_uploader("2. Tarifa Internacional (Excel)", type=[
 pestañas_nac = {}
 pestañas_int = {}
 
-# Sincronización estricta con tus nombres reales de pestañas (Mayúsculas completas)
 pestañas_nac_esperadas = ["AMAZON", "MIRAVIA", "MEDIAMARKT", "CARREFOUR", "PRIVALIA"]
 pestañas_int_esperadas = [
     "FRANCIA (ES-FR)", "FRANCIA (FR-FR)", "ITALIA (ES-IT)", "ITALIA (IT-IT)", 
@@ -166,40 +165,44 @@ if archivo_int:
         st.sidebar.error(f"Error al leer Tarifa Internacional: {e}")
 
 # =========================================================================
-# PANEL DE CONTROL DINÁMICO DE MAPEO
+# PANEL DE CONTROL DINÁMICO DE MAPEO (VALORES POR DEFECTO ACTUALIZADOS)
 # =========================================================================
 st.write("---")
 with st.expander("🛠️ Panel Avanzado de Mapeo y Remapeo de Columnas"):
-    st.write("Si cambias el orden de los archivos Excel, puedes ajustar los índices aquí de forma visual:")
+    st.write("Configuración de columnas por defecto actualizada según la nueva estructura del Excel:")
     c_map1, c_map2 = st.columns(2)
     
     with c_map1:
         st.markdown("**📌 Canales Nacionales**")
         sample_nac = pestañas_nac.get("AMAZON") if "AMAZON" in pestañas_nac else (next(iter(pestañas_nac.values())) if pestañas_nac else None)
-        max_cols_nac = len(sample_nac.columns) if sample_nac is not None else 20
+        max_cols_nac = len(sample_nac.columns) if sample_nac is not None else 24
         opciones_cols_nac = [f"Columna {letra_columna(i)} (Índice {i})" for i in range(max_cols_nac)]
         
+        # Puesta por defecto la Columna A (Índice 0) para Referencia y Columna R (Índice 17) para PVP PUBLICADO
         re_ref_nac = st.selectbox("Columna de Referencia / SKU (Nacional):", opciones_cols_nac, index=0)
-        re_pvp_amz = st.selectbox("Columna PVP PUB para AMAZON, MIRAVIA, CARREFOUR:", opciones_cols_nac, index=15)
-        re_pvp_mm  = st.selectbox("Columna PVP PUB para MEDIAMARKT:", opciones_cols_nac, index=16)
+        re_pvp_nac = st.selectbox("Columna PVP PUBLICADO unificado (Nacional):", opciones_cols_nac, index=17)
         
         idx_ref_nac = opciones_cols_nac.index(re_ref_nac)
-        idx_pvp_nac = opciones_cols_nac.index(re_pvp_amz)
-        idx_mm_pub  = opciones_cols_nac.index(re_pvp_mm)
+        idx_pvp_nac_def = opciones_cols_nac.index(re_pvp_nac)
 
     with c_map2:
         st.markdown("**📌 Canales Internacionales**")
         sample_int = pestañas_int.get("FRANCIA (ES-FR)") if "FRANCIA (ES-FR)" in pestañas_int else (next(iter(pestañas_int.values())) if pestañas_int else None)
-        max_cols_int = len(sample_int.columns) if sample_int is not None else 20
+        max_cols_int = len(sample_int.columns) if sample_int is not None else 24
         opciones_cols_int = [f"Columna {letra_columna(i)} (Índice {i})" for i in range(max_cols_int)]
         
-        re_ref_int = st.selectbox("Columna de Referencia / SKU (Internacional):", opciones_cols_int, index=2)
-        re_pvp_int = st.selectbox("Columna PVP PUB Estándar (FR, IT, DE, PT, NL, BE):", opciones_cols_int, index=12)
-        re_pvp_div = st.selectbox("Columna PVP Divisas Especiales (PL, SE):", opciones_cols_int, index=13)
+        # Valores de referencia internacionales configurables dinámicamente si varía el Excel
+        re_ref_int = st.selectbox("Columna de Referencia / SKU (Internacional):", opciones_cols_int, index=0)
+        re_pvp_es_xxx = st.selectbox("Columna PVP para Cruces ES-XX (Columna S):", opciones_cols_int, index=18)
+        re_pvp_xx_xx  = st.selectbox("Columna PVP para Cruces XX-XX (Columna T):", opciones_cols_int, index=19)
+        re_pvp_std_int = st.selectbox("Columna PVP Estándar PT, NL, BE (Columna R):", opciones_cols_int, index=17)
+        re_pvp_div_int = st.selectbox("Columna PVPR Divisas Especiales PL, SE (Columna I):", opciones_cols_int, index=8)
         
         idx_ref_int = opciones_cols_int.index(re_ref_int)
-        idx_pvp_int = opciones_cols_int.index(re_pvp_int)
-        idx_div_pub = opciones_cols_int.index(re_pvp_div)
+        idx_s_precio = opciones_cols_int.index(re_pvp_es_xxx)
+        idx_t_precio = opciones_cols_int.index(re_pvp_xx_xx)
+        idx_r_precio = opciones_cols_int.index(re_pvp_std_int)
+        idx_i_precio = opciones_cols_int.index(re_pvp_div_int)
 
 columnas_plantilla = [
     'reference', 'price_france', 'price_italy', 'price_germany', 'price_portugal',
@@ -210,7 +213,7 @@ columnas_plantilla = [
 columnas_de_precio_totales = [c for c in columnas_plantilla if c != 'reference']
 
 # =========================================================================
-# VISTA DE PESTAÑAS DE TRABAJO (BLOQUES)
+# VISTA DE PESTAÑAS DE TRABAJO
 # =========================================================================
 tab1, tab2 = st.tabs(["📦 Bloque 1: Características", "🚀 Bloque 2: Cargador de Precios (3 Ficheros)"])
 
@@ -222,26 +225,28 @@ with tab1:
     st.write("Genera los archivos individuales organizados y limpios en formato **Excel (.xlsx)**.")
 
     reglas_caracteristicas = {
-        "PVP_LEROYES": ("Nacional", ["AMAZON"], idx_ref_nac, idx_pvp_nac), 
-        "PVP_PcComponentes": ("Nacional", ["MEDIAMARKT"], idx_ref_nac, idx_mm_pub),
-        "PVPR": ("Nacional", ["AMAZON"], idx_ref_nac, idx_pvp_nac),
-        "PVP ESPANA": ("Nacional", ["AMAZON"], idx_ref_nac, idx_pvp_nac),
-        "Pvp mediamarkt es": ("Nacional", ["MEDIAMARKT"], idx_ref_nac, idx_mm_pub),
-        "PVP_SHEIN_ES": ("Nacional", ["AMAZON"], idx_ref_nac, idx_pvp_nac),
-        "Prix_France": ("Internacional", ["FRANCIA (ES-FR)"], idx_ref_int, idx_pvp_int),
-        "PVP_SHEIN_FR": ("Internacional", ["FRANCIA (ES-FR)"], idx_ref_int, idx_pvp_int),
-        "Prix_Italia": ("Internacional", ["ITALIA (ES-IT)"], idx_ref_int, idx_pvp_int),
-        "PVP_SHEIN_IT": ("Internacional", ["ITALIA (ES-IT)"], idx_ref_int, idx_pvp_int),
-        "prix_Alemania": ("Internacional", ["ALEMANAI (ES-DE)"], idx_ref_int, idx_pvp_int),
-        "PVP_SHEIN_DE": ("Internacional", ["ALEMANAI (ES-DE)"], idx_ref_int, idx_pvp_int),
-        "PVP_SHEIN_PT": ("Internacional", ["PORTUGAL"], idx_ref_int, idx_pvp_int),
-        "PVP PORTUGAL": ("Internacional", ["PORTUGAL"], idx_ref_int, idx_pvp_int),
-        "PVP_BE": ("Internacional", ["BELGICA"], idx_ref_int, idx_pvp_int),
-        "PRIXHOLANDA": ("Internacional", ["HOLANDA"], idx_ref_int, idx_pvp_int),
-        "PVP_SHEIN_NL": ("Internacional", ["HOLANDA"], idx_ref_int, idx_pvp_int),
-        "PVP_SHEIN_PL": ("Internacional", ["POLONIA"], idx_ref_int, idx_div_pub),
-        "PRIX_POLONIA": ("Internacional", ["POLONIA"], idx_ref_int, idx_div_pub),
-        "PVP Suecia": ("Internacional", ["SUECIA"], idx_ref_int, idx_div_pub)
+        # España (Tarifa Nacional unificada a Columna R)
+        "PVP_LEROYES": ("Nacional", ["AMAZON"], idx_ref_nac, idx_pvp_nac_def), 
+        "PVP_PcComponentes": ("Nacional", ["MEDIAMARKT"], idx_ref_nac, idx_pvp_nac_def),
+        "PVPR": ("Nacional", ["AMAZON"], idx_ref_nac, idx_pvp_nac_def),
+        "PVP ESPANA": ("Nacional", ["AMAZON"], idx_ref_nac, idx_pvp_nac_def),
+        "Pvp mediamarkt es": ("Nacional", ["MEDIAMARKT"], idx_ref_nac, idx_pvp_nac_def),
+        "PVP_SHEIN_ES": ("Nacional", ["AMAZON"], idx_ref_nac, idx_pvp_nac_def),
+        # Internacional estructurado por columnas explícitas
+        "Prix_France": ("Internacional", ["FRANCIA (ES-FR)"], idx_ref_int, idx_s_precio),
+        "PVP_SHEIN_FR": ("Internacional", ["FRANCIA (ES-FR)"], idx_ref_int, idx_s_precio),
+        "Prix_Italia": ("Internacional", ["ITALIA (ES-IT)"], idx_ref_int, idx_s_precio),
+        "PVP_SHEIN_IT": ("Internacional", ["ITALIA (ES-IT)"], idx_ref_int, idx_s_precio),
+        "prix_Alemania": ("Internacional", ["ALEMANAI (ES-DE)"], idx_ref_int, idx_s_precio),
+        "PVP_SHEIN_DE": ("Internacional", ["ALEMANAI (ES-DE)"], idx_ref_int, idx_s_precio),
+        "PVP_SHEIN_PT": ("Internacional", ["PORTUGAL"], idx_ref_int, idx_r_precio),
+        "PVP PORTUGAL": ("Internacional", ["PORTUGAL"], idx_ref_int, idx_r_precio),
+        "PVP_BE": ("Internacional", ["BELGICA"], idx_ref_int, idx_r_precio),
+        "PRIXHOLANDA": ("Internacional", ["HOLANDA"], idx_ref_int, idx_r_precio),
+        "PVP_SHEIN_NL": ("Internacional", ["HOLANDA"], idx_ref_int, idx_r_precio),
+        "PVP_SHEIN_PL": ("Internacional", ["POLONIA"], idx_ref_int, idx_i_precio),
+        "PRIX_POLONIA": ("Internacional", ["POLONIA"], idx_ref_int, idx_i_precio),
+        "PVP Suecia": ("Internacional", ["SUECIA"], idx_ref_int, idx_i_precio)
     }
 
     if st.button("📦 Generar todas las Características"):
@@ -274,9 +279,9 @@ with tab1:
 
             if diccionario_archivos:
                 st.session_state["archivos_caracteristicas"] = diccionario_archivos
-                st.success(f"¡Procesamiento completo! {len(diccionario_archivos)} archivos de características preparados.")
+                st.success(f"¡Procesamiento completo! {len(diccionario_archivos)} archivos preparados.")
             else:
-                st.error("No se pudo extraer información. Revisa los índices del panel de mapeo.")
+                st.error("No se pudo extraer información válida. Verifica las columnas seleccionadas.")
 
     if "archivos_caracteristicas" in st.session_state:
         archivos = st.session_state["archivos_caracteristicas"]
@@ -313,11 +318,11 @@ with tab2:
         if not archivo_nac or not archivo_int or df_amz is None:
             st.error("Asegúrate de subir ambos archivos y que el Nacional contenga la pestaña 'AMAZON'.")
         else:
-            # --- PROCESAMIENTO FICHERO 1: ESPAÑA ---
-            map_amz = extraer_precios_por_posicion(df_amz, idx_ref_nac, idx_pvp_nac)
-            map_mir = extraer_precios_por_posicion(pestañas_nac.get("MIRVIA"), idx_ref_nac, idx_pvp_nac)
-            map_mm = extraer_precios_por_posicion(pestañas_nac.get("MEDIAMARKT"), idx_ref_nac, idx_mm_pub)
-            map_c4 = extraer_precios_por_posicion(pestañas_nac.get("CARREFOUR"), idx_ref_nac, idx_pvp_nac)
+            # --- PROCESAMIENTO FICHERO 1: ESPAÑA (Unificado a Columna R / Índice 17) ---
+            map_amz = extraer_precios_por_posicion(df_amz, idx_ref_nac, idx_pvp_nac_def)
+            map_mir = extraer_precios_por_posicion(pestañas_nac.get("MIRVIA"), idx_ref_nac, idx_pvp_nac_def)
+            map_mm = extraer_precios_por_posicion(pestañas_nac.get("MEDIAMARKT"), idx_ref_nac, idx_pvp_nac_def)
+            map_c4 = extraer_precios_por_posicion(pestañas_nac.get("CARREFOUR"), idx_ref_nac, idx_pvp_nac_def)
             
             df_f1 = pd.DataFrame(columns=columnas_plantilla)
             df_f1['reference'] = list(map_amz.keys())
@@ -336,10 +341,10 @@ with tab2:
                     df_f1[c] = df_f1[c].apply(lambda x: f"{x:.2f}" if isinstance(x, (int, float)) else x)
             st.session_state["bytes_cargador_f1"] = exportar_excel_con_cabecera_herramientas(df_f1, columnas_plantilla)
 
-            # --- PROCESAMIENTO FICHERO 2: PORTUGAL ---
+            # --- PROCESAMIENTO FICHERO 2: PORTUGAL (Columna R / Índice 17) ---
             df_pt = pestañas_int.get("PORTUGAL")
             if df_pt is not None:
-                map_pt = extraer_precios_por_posicion(df_pt, idx_ref_int, idx_pvp_int)
+                map_pt = extraer_precios_por_posicion(df_pt, idx_ref_int, idx_r_precio)
                 df_f2 = pd.DataFrame(columns=columnas_plantilla)
                 df_f2['reference'] = list(map_pt.keys())
                 df_f2['price_portugal'] = list(map_pt.values())
@@ -362,12 +367,13 @@ with tab2:
                     if p in pestañas_int: return extraer_precios_por_posicion(pestañas_int[p], col_ref, col_precio)
                 return {}
 
-            map_fr = buscar_y_extraer(["FRANCIA (ES-FR)"], idx_ref_int, idx_pvp_int)
-            map_it = buscar_y_extraer(["ITALIA (ES-IT)"], idx_ref_int, idx_pvp_int)
-            map_de = buscar_y_extraer(["ALEMANAI (ES-DE)"], idx_ref_int, idx_pvp_int)
-            map_nl = buscar_y_extraer(["HOLANDA"], idx_ref_int, idx_pvp_int)
-            map_be = buscar_y_extraer(["BELGICA"], idx_ref_int, idx_pvp_int)
-            map_pl_zlotis = buscar_y_extraer(["POLONIA"], idx_ref_int, idx_div_pub)
+            # Extracción distribuida según las especificaciones exactas
+            map_fr = buscar_y_extraer(["FRANCIA (ES-FR)"], idx_ref_int, idx_s_precio)
+            map_it = buscar_y_extraer(["ITALIA (ES-IT)"], idx_ref_int, idx_s_precio)
+            map_de = buscar_y_extraer(["ALEMANAI (ES-DE)"], idx_ref_int, idx_s_precio)
+            map_nl = buscar_y_extraer(["HOLANDA"], idx_ref_int, idx_r_precio)
+            map_be = buscar_y_extraer(["BELGICA"], idx_ref_int, idx_r_precio)
+            map_pl_zlotis = buscar_y_extraer(["POLONIA"], idx_ref_int, idx_i_precio)
 
             df_f3['price_france'] = df_f3['reference'].map(map_fr)
             df_f3['price_italy'] = df_f3['reference'].map(map_it)
@@ -387,7 +393,7 @@ with tab2:
             st.success("¡Los 3 archivos del cargador se han procesado de forma limpia!")
 
 if "bytes_cargador_f1" in st.session_state:
-    st.write("### ⬇ ... Descarga de Plantillas Horizontales (.xlsx)")
+    st.write("### ⬇️ Descarga de Plantillas Horizontales (.xlsx)")
     col1, col2, col3 = st.columns(3)
     with col1:
         st.subheader("1. Tarifa Nacional España")
