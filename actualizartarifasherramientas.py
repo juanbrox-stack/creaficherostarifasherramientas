@@ -111,7 +111,7 @@ def letra_columna(n):
     return string
 
 # =========================================================================
-# BARRA LATERAL - CARGA DE ARCHIVOS MAESTROS Y VALIDACIÓN
+# BARRA LATERAL - CARGA DE ARCHIVOS MAESTROS Y VALIDACIÓN SINCRO
 # =========================================================================
 st.sidebar.header("📂 Archivos Maestros de Origen")
 archivo_nac = st.sidebar.file_uploader("1. Tarifa Nacional (Excel)", type=["xlsx"])
@@ -120,8 +120,8 @@ archivo_int = st.sidebar.file_uploader("2. Tarifa Internacional (Excel)", type=[
 pestañas_nac = {}
 pestañas_int = {}
 
-pestañas_nac_esperadas = ["T_AMZ", "T_MM", "T_MIR", "T_C4", "T_PRIV"]
-# Adaptado exactamente a los nombres reales de tus pestañas internacionales
+# Sincronización estricta con tus nombres reales de pestañas (Mayúsculas completas)
+pestañas_nac_esperadas = ["AMAZON", "MIRAVIA", "MEDIAMARKT", "CARREFOUR", "PRIVALIA"]
 pestañas_int_esperadas = [
     "FRANCIA (ES-FR)", "FRANCIA (FR-FR)", "ITALIA (ES-IT)", "ITALIA (IT-IT)", 
     "ALEMANAI (ES-DE)", "ALEMANIA (DE-DE)", "PORTUGAL", "HOLANDA", "BELGICA", "POLONIA", "SUECIA"
@@ -130,7 +130,7 @@ pestañas_int_esperadas = [
 if archivo_nac:
     try:
         xl_nac = pd.ExcelFile(archivo_nac)
-        pestañas_detectadas = xl_nac.sheet_names  # Corrección de la errata ortográfica
+        pestañas_detectadas = xl_nac.sheet_names
         for sheet in pestañas_detectadas:
             pestañas_nac[sheet] = xl_nac.parse(sheet, header=None)
         
@@ -142,7 +142,7 @@ if archivo_nac:
         if pestañas_nuevas:
             st.sidebar.warning(f"💡 Pestañas adicionales detectadas: {pestañas_nuevas}")
         if not pestañas_faltantes:
-            st.sidebar.success("✅ Estructura Nacional validada.")
+            st.sidebar.success("✅ Estructura Nacional validada correctamente.")
     except Exception as e:
         st.sidebar.error(f"Error al leer Tarifa Nacional: {e}")
 
@@ -161,7 +161,7 @@ if archivo_int:
         if pestañas_nuevas_int:
             st.sidebar.warning(f"💡 Pestañas adicionales detectadas: {pestañas_nuevas_int}")
         if not pestañas_faltantes_int:
-            st.sidebar.success("✅ Estructura Internacional validada.")
+            st.sidebar.success("✅ Estructura Internacional validada correctamente.")
     except Exception as e:
         st.sidebar.error(f"Error al leer Tarifa Internacional: {e}")
 
@@ -170,18 +170,18 @@ if archivo_int:
 # =========================================================================
 st.write("---")
 with st.expander("🛠️ Panel Avanzado de Mapeo y Remapeo de Columnas"):
-    st.write("Si cambias el orden de los archivos Excel, puedes ajustar los índices aquí:")
+    st.write("Si cambias el orden de los archivos Excel, puedes ajustar los índices aquí de forma visual:")
     c_map1, c_map2 = st.columns(2)
     
     with c_map1:
         st.markdown("**📌 Canales Nacionales**")
-        sample_nac = pestañas_nac.get("T_AMZ") if "T_AMZ" in pestañas_nac else (next(iter(pestañas_nac.values())) if pestañas_nac else None)
+        sample_nac = pestañas_nac.get("AMAZON") if "AMAZON" in pestañas_nac else (next(iter(pestañas_nac.values())) if pestañas_nac else None)
         max_cols_nac = len(sample_nac.columns) if sample_nac is not None else 20
         opciones_cols_nac = [f"Columna {letra_columna(i)} (Índice {i})" for i in range(max_cols_nac)]
         
         re_ref_nac = st.selectbox("Columna de Referencia / SKU (Nacional):", opciones_cols_nac, index=0)
-        re_pvp_amz = st.selectbox("Columna PVP PUB para T_AMZ, T_MIR, T_C4:", opciones_cols_nac, index=15)
-        re_pvp_mm  = st.selectbox("Columna PVP PUB para T_MM:", opciones_cols_nac, index=16)
+        re_pvp_amz = st.selectbox("Columna PVP PUB para AMAZON, MIRAVIA, CARREFOUR:", opciones_cols_nac, index=15)
+        re_pvp_mm  = st.selectbox("Columna PVP PUB para MEDIAMARKT:", opciones_cols_nac, index=16)
         
         idx_ref_nac = opciones_cols_nac.index(re_ref_nac)
         idx_pvp_nac = opciones_cols_nac.index(re_pvp_amz)
@@ -210,7 +210,7 @@ columnas_plantilla = [
 columnas_de_precio_totales = [c for c in columnas_plantilla if c != 'reference']
 
 # =========================================================================
-# VISTA DE PESTAÑAS DE TRABAJO
+# VISTA DE PESTAÑAS DE TRABAJO (BLOQUES)
 # =========================================================================
 tab1, tab2 = st.tabs(["📦 Bloque 1: Características", "🚀 Bloque 2: Cargador de Precios (3 Ficheros)"])
 
@@ -221,14 +221,13 @@ with tab1:
     st.header("Generación Masiva por Características")
     st.write("Genera los archivos individuales organizados y limpios en formato **Excel (.xlsx)**.")
 
-    # Mapeo corregido usando los nombres literales exactos de tus pestañas
     reglas_caracteristicas = {
-        "PVP_LEROYES": ("Nacional", ["T_AMZ"], idx_ref_nac, idx_pvp_nac), 
-        "PVP_PcComponentes": ("Nacional", ["T_MM"], idx_ref_nac, idx_mm_pub),
-        "PVPR": ("Nacional", ["T_AMZ"], idx_ref_nac, idx_pvp_nac),
-        "PVP ESPANA": ("Nacional", ["T_AMZ"], idx_ref_nac, idx_pvp_nac),
-        "Pvp mediamarkt es": ("Nacional", ["T_MM"], idx_ref_nac, idx_mm_pub),
-        "PVP_SHEIN_ES": ("Nacional", ["T_AMZ"], idx_ref_nac, idx_pvp_nac),
+        "PVP_LEROYES": ("Nacional", ["AMAZON"], idx_ref_nac, idx_pvp_nac), 
+        "PVP_PcComponentes": ("Nacional", ["MEDIAMARKT"], idx_ref_nac, idx_mm_pub),
+        "PVPR": ("Nacional", ["AMAZON"], idx_ref_nac, idx_pvp_nac),
+        "PVP ESPANA": ("Nacional", ["AMAZON"], idx_ref_nac, idx_pvp_nac),
+        "Pvp mediamarkt es": ("Nacional", ["MEDIAMARKT"], idx_ref_nac, idx_mm_pub),
+        "PVP_SHEIN_ES": ("Nacional", ["AMAZON"], idx_ref_nac, idx_pvp_nac),
         "Prix_France": ("Internacional", ["FRANCIA (ES-FR)"], idx_ref_int, idx_pvp_int),
         "PVP_SHEIN_FR": ("Internacional", ["FRANCIA (ES-FR)"], idx_ref_int, idx_pvp_int),
         "Prix_Italia": ("Internacional", ["ITALIA (ES-IT)"], idx_ref_int, idx_pvp_int),
@@ -275,9 +274,9 @@ with tab1:
 
             if diccionario_archivos:
                 st.session_state["archivos_caracteristicas"] = diccionario_archivos
-                st.success(f"¡Procesamiento completo! {len(diccionario_archivos)} archivos preparados.")
+                st.success(f"¡Procesamiento completo! {len(diccionario_archivos)} archivos de características preparados.")
             else:
-                st.error("No se pudo extraer información. Revisa los índices seleccionados en el Mapeo.")
+                st.error("No se pudo extraer información. Revisa los índices del panel de mapeo.")
 
     if "archivos_caracteristicas" in st.session_state:
         archivos = st.session_state["archivos_caracteristicas"]
@@ -310,15 +309,15 @@ with tab2:
     st.write("Presiona el botón para procesar las tarifas horizontales.")
     
     if st.button("🚀 Procesar y Preparar Ficheros del Cargador"):
-        df_amz = pestañas_nac.get("T_AMZ")
+        df_amz = pestañas_nac.get("AMAZON")
         if not archivo_nac or not archivo_int or df_amz is None:
-            st.error("Asegúrate de subir ambos archivos y que el Nacional contenga la pestaña 'T_AMZ'.")
+            st.error("Asegúrate de subir ambos archivos y que el Nacional contenga la pestaña 'AMAZON'.")
         else:
             # --- PROCESAMIENTO FICHERO 1: ESPAÑA ---
             map_amz = extraer_precios_por_posicion(df_amz, idx_ref_nac, idx_pvp_nac)
-            map_mir = extraer_precios_por_posicion(pestañas_nac.get("T_MIR"), idx_ref_nac, idx_pvp_nac)
-            map_mm = extraer_precios_por_posicion(pestañas_nac.get("T_MM"), idx_ref_nac, idx_mm_pub)
-            map_c4 = extraer_precios_por_posicion(pestañas_nac.get("T_C4"), idx_ref_nac, idx_pvp_nac)
+            map_mir = extraer_precios_por_posicion(pestañas_nac.get("MIRVIA"), idx_ref_nac, idx_pvp_nac)
+            map_mm = extraer_precios_por_posicion(pestañas_nac.get("MEDIAMARKT"), idx_ref_nac, idx_mm_pub)
+            map_c4 = extraer_precios_por_posicion(pestañas_nac.get("CARREFOUR"), idx_ref_nac, idx_pvp_nac)
             
             df_f1 = pd.DataFrame(columns=columnas_plantilla)
             df_f1['reference'] = list(map_amz.keys())
@@ -385,10 +384,10 @@ with tab2:
                 if c != 'reference': df_f3[c] = df_f3[c].apply(lambda x: f"{x:.2f}" if isinstance(x, (int, float)) else x)
             
             st.session_state["bytes_cargador_f3"] = exportar_excel_con_cabecera_herramientas(df_f3, columnas_plantilla)
-            st.success("¡Los 3 archivos del cargador se han procesado limpiando los registros vacíos!")
+            st.success("¡Los 3 archivos del cargador se han procesado de forma limpia!")
 
 if "bytes_cargador_f1" in st.session_state:
-    st.write("### ⬇️ Descarga de Plantillas Horizontales (.xlsx)")
+    st.write("### ⬇ ... Descarga de Plantillas Horizontales (.xlsx)")
     col1, col2, col3 = st.columns(3)
     with col1:
         st.subheader("1. Tarifa Nacional España")
