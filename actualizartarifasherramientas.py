@@ -237,10 +237,16 @@ with st.expander("🛠️ Panel Avanzado de Mapeo y Remapeo de Columnas"):
         opciones_cols_vent = [f"Columna {letra_columna(i)} (Índice {i})" for i in range(max_cols_vent)]
 
         re_ref_vent = st.selectbox("Columna de Referencia / SKU (VENT.):", opciones_cols_vent, index=0)
-        re_pvp_vent = st.selectbox("Columna PVP PUB (VENT.) — por defecto Col. L:", opciones_cols_vent, index=11)
+        re_pvp_vent = st.selectbox("Columna PVP PUB (VENT.) — por defecto Col. L:", opciones_cols_vent, index=min(11, max_cols_vent - 1))
 
         idx_ref_vent = opciones_cols_vent.index(re_ref_vent)
         idx_pvp_vent = opciones_cols_vent.index(re_pvp_vent)
+
+        if sample_vent is not None:
+            st.markdown("**Preview primeras 5 filas del archivo VENT.:**")
+            preview = sample_vent.head(5).copy()
+            preview.columns = [f"{letra_columna(i)} ({i})" for i in range(len(preview.columns))]
+            st.dataframe(preview, use_container_width=True)
 
 columnas_plantilla = [
     'reference', 'price_france', 'price_italy', 'price_germany', 'price_portugal',
@@ -295,8 +301,8 @@ with tab1:
     }
 
     if st.button("📦 Generar todas las Características"):
-        if not archivo_nac or not archivo_int:
-            st.error("Por favor, asegúrate de subir los archivos maestros en la barra lateral.")
+        if not archivo_nac and not archivo_int and not archivo_vent:
+            st.error("Por favor, sube al menos un archivo maestro en la barra lateral.")
         else:
             diccionario_archivos = {}
             for nombre_carac, (tipo, posibles_pestañas, col_ref, col_precio) in reglas_caracteristicas.items():
