@@ -177,15 +177,16 @@ if archivo_vent:
         for sheet in pestañas_detectadas_vent:
             pestañas_vent[sheet] = xl_vent.parse(sheet, header=None)
 
-        pestañas_faltantes_vent = [p for p in pestañas_vent_esperadas if p not in pestañas_detectadas_vent]
-        pestañas_nuevas_vent = [p for p in pestañas_detectadas_vent if p not in pestañas_vent_esperadas]
+        # Solo mostramos las pestanas encontradas; no hay obligatorias
+        encontradas_vent = [p for p in pestañas_detectadas_vent if p in pestañas_vent_esperadas]
+        extras_vent = [p for p in pestañas_detectadas_vent if p not in pestañas_vent_esperadas]
 
-        if pestañas_faltantes_vent:
-            st.sidebar.error(f"⚠️ Faltan pestañas VENT.: {pestañas_faltantes_vent}")
-        if pestañas_nuevas_vent:
-            st.sidebar.warning(f"💡 Pestañas VENT. adicionales: {pestañas_nuevas_vent}")
-        if not pestañas_faltantes_vent:
-            st.sidebar.success("✅ Estructura VENT. validada correctamente.")
+        if encontradas_vent:
+            st.sidebar.success(f"✅ VENT. cargado: {encontradas_vent}")
+        if extras_vent:
+            st.sidebar.info(f"💡 Otras pestañas detectadas: {extras_vent}")
+        if not encontradas_vent and not extras_vent:
+            st.sidebar.warning("⚠️ No se encontraron pestañas reconocidas en el archivo VENT.")
     except Exception as e:
         st.sidebar.error(f"Error al leer Tarifa VENT.: {e}")
 
