@@ -421,76 +421,67 @@ with tab2:
             else:
                 cargador_generado["f2"] = None
 
-            # --- FICHERO 3: RESTO EUROPA (Internacional) ---
+            # --- FICHERO 3: RESTO EUROPA (Internacional + VENT. ES-XX) ---
             def buscar_y_extraer_int(lista_pestañas, col_ref, col_precio):
                 for p in lista_pestañas:
                     if p in pestañas_int:
                         return extraer_precios_por_posicion(pestañas_int[p], col_ref, col_precio)
                 return {}
 
-            refs_f3 = set()
-            for p in pestañas_int.values():
-                refs_f3.update(extraer_precios_por_posicion(p, idx_ref_int, idx_ref_int).keys())
-            if df_amz is not None:
-                refs_f3.update(extraer_precios_por_posicion(df_amz, idx_ref_nac, idx_ref_nac).keys())
+            def buscar_y_extraer_vent(pestaña):
+                df_v = pestañas_vent.get(pestaña)
+                return extraer_precios_por_posicion(df_v, idx_ref_vent, idx_pvp_vent) if df_v is not None else {}
 
-            if refs_f3 or pestañas_int:
-                map_fr = buscar_y_extraer_int(["FRANCIA (ES-FR)"], idx_ref_int, idx_s_precio)
-                map_it = buscar_y_extraer_int(["ITALIA (ES-IT)"], idx_ref_int, idx_s_precio)
-                map_de = buscar_y_extraer_int(["ALEMANAI (ES-DE)"], idx_ref_int, idx_s_precio)
-                map_nl = buscar_y_extraer_int(["HOLANDA"], idx_ref_int, idx_r_precio)
-                map_be = buscar_y_extraer_int(["BELGICA"], idx_ref_int, idx_r_precio)
-                map_pl = buscar_y_extraer_int(["POLONIA"], idx_ref_int, idx_i_precio)
-                all_refs_f3 = sorted(set(list(map_fr) + list(map_it) + list(map_de) + list(map_nl) + list(map_be) + list(map_pl)))
-                if all_refs_f3:
-                    df_f3 = pd.DataFrame(columns=columnas_plantilla)
-                    df_f3['reference']    = all_refs_f3
-                    df_f3['price_france'] = df_f3['reference'].map(map_fr)
-                    df_f3['price_italy']  = df_f3['reference'].map(map_it)
-                    df_f3['price_germany']= df_f3['reference'].map(map_de)
-                    df_f3['price_holand'] = df_f3['reference'].map(map_nl).combine_first(df_f3['reference'].map(map_be))
-                    df_f3['price_poland'] = df_f3['reference'].map(map_pl)
-                    cargador_generado["f3"] = exportar_excel_con_cabecera_herramientas(df_limpio(df_f3), columnas_plantilla)
-                else:
-                    cargador_generado["f3"] = None
+            # Internacional
+            map_fr = buscar_y_extraer_int(["FRANCIA (ES-FR)"], idx_ref_int, idx_s_precio)
+            map_it = buscar_y_extraer_int(["ITALIA (ES-IT)"], idx_ref_int, idx_s_precio)
+            map_de = buscar_y_extraer_int(["ALEMANAI (ES-DE)"], idx_ref_int, idx_s_precio)
+            map_nl = buscar_y_extraer_int(["HOLANDA"], idx_ref_int, idx_r_precio)
+            map_be = buscar_y_extraer_int(["BELGICA"], idx_ref_int, idx_r_precio)
+            map_pl = buscar_y_extraer_int(["POLONIA"], idx_ref_int, idx_i_precio)
+
+            # VENT. ES-XX: si hay datos VENT, se usan para price_france/italy/germany
+            # complementando (combine_first) los datos del Internacional
+            if archivo_vent and pestañas_vent:
+                map_vent_fr = buscar_y_extraer_vent("VENT. ES-FR")
+                map_vent_it = buscar_y_extraer_vent("VENT. ES-IT")
+                map_vent_de = buscar_y_extraer_vent("VENT. ES-DE")
+            else:
+                map_vent_fr = {}
+                map_vent_it = {}
+                map_vent_de = {}
+
+            all_refs_f3 = sorted(set(
+                list(map_fr) + list(map_it) + list(map_de) +
+                list(map_nl) + list(map_be) + list(map_pl) +
+                list(map_vent_fr) + list(map_vent_it) + list(map_vent_de)
+            ))
+
+            if all_refs_f3:
+                df_f3 = pd.DataFrame(columns=columnas_plantilla)
+                df_f3['reference'] = all_refs_f3
+
+                # price_france: Internacional primero, VENT. ES-FR como fallback (o al revés si no hay int)
+                serie_fr_int  = df_f3['reference'].map(map_fr)
+                serie_fr_vent = df_f3['reference'].map(map_vent_fr)
+                df_f3['price_france']  = serie_fr_int.combine_first(serie_fr_vent)
+
+                serie_it_int  = df_f3['reference'].map(map_it)
+                serie_it_vent = df_f3['reference'].map(map_vent_it)
+                df_f3['price_italy']   = serie_it_int.combine_first(serie_it_vent)
+
+                serie_de_int  = df_f3['reference'].map(map_de)
+                serie_de_vent = df_f3['reference'].map(map_vent_de)
+                df_f3['price_germany'] = serie_de_int.combine_first(serie_de_vent)
+
+                df_f3['price_holand'] = df_f3['reference'].map(map_nl).combine_first(df_f3['reference'].map(map_be))
+                df_f3['price_poland'] = df_f3['reference'].map(map_pl)
+
+                cargador_generado["f3"] = exportar_excel_con_cabecera_herramientas(df_limpio(df_f3), columnas_plantilla)
             else:
                 cargador_generado["f3"] = None
 
-            # --- FICHERO 4: VENT. ---
-            if archivo_vent and pestañas_vent:
-                def buscar_y_extraer_vent(pestaña):
-                    df_v = pestañas_vent.get(pestaña)
-                    return extraer_precios_por_posicion(df_v, idx_ref_vent, idx_pvp_vent) if df_v is not None else {}
-
-                map_v_es_fr = buscar_y_extraer_vent("VENT. ES-FR")
-                map_v_fr_fr = buscar_y_extraer_vent("VENT. FR-FR")
-                map_v_es_it = buscar_y_extraer_vent("VENT. ES-IT")
-                map_v_it_it = buscar_y_extraer_vent("VENT. IT-IT")
-                map_v_es_de = buscar_y_extraer_vent("VENT. ES-DE")
-                map_v_de_de = buscar_y_extraer_vent("VENT. DE-DE")
-
-                all_refs_vent = sorted(set(
-                    list(map_v_es_fr) + list(map_v_fr_fr) + list(map_v_es_it) +
-                    list(map_v_it_it) + list(map_v_es_de) + list(map_v_de_de)
-                ))
-                if all_refs_vent:
-                    df_f4 = pd.DataFrame(columns=['reference', 'VENT_ES-FR', 'VENT_FR-FR', 'VENT_ES-IT', 'VENT_IT-IT', 'VENT_ES-DE', 'VENT_DE-DE'])
-                    df_f4['reference']  = all_refs_vent
-                    df_f4['VENT_ES-FR'] = df_f4['reference'].map(map_v_es_fr)
-                    df_f4['VENT_FR-FR'] = df_f4['reference'].map(map_v_fr_fr)
-                    df_f4['VENT_ES-IT'] = df_f4['reference'].map(map_v_es_it)
-                    df_f4['VENT_IT-IT'] = df_f4['reference'].map(map_v_it_it)
-                    df_f4['VENT_ES-DE'] = df_f4['reference'].map(map_v_es_de)
-                    df_f4['VENT_DE-DE'] = df_f4['reference'].map(map_v_de_de)
-                    cols_vent = [c for c in df_f4.columns if c != 'reference']
-                    df_f4 = df_f4.dropna(subset=cols_vent, how='all').fillna("")
-                    for c in cols_vent:
-                        df_f4[c] = df_f4[c].apply(fmt_precio)
-                    cargador_generado["f4"] = exportar_excel_con_cabecera_herramientas(df_f4, list(df_f4.columns))
-                else:
-                    cargador_generado["f4"] = None
-            else:
-                cargador_generado["f4"] = None
+            cargador_generado["f4"] = None  # ya no existe fichero 4 separado
 
             st.session_state["cargador_generado"] = cargador_generado
             n_ok = sum(1 for v in cargador_generado.values() if v is not None)
@@ -499,7 +490,7 @@ with tab2:
 if "cargador_generado" in st.session_state:
     cg = st.session_state["cargador_generado"]
     st.write("### ⬇️ Descarga de Plantillas Horizontales (.xlsx)")
-    col1, col2, col3, col4 = st.columns(4)
+    col1, col2, col3 = st.columns(3)
     with col1:
         st.subheader("1. España")
         if cg.get("f1"):
@@ -513,17 +504,11 @@ if "cargador_generado" in st.session_state:
         else:
             st.caption("Sin datos (sube Tarifa Internacional con pestaña PORTUGAL).")
     with col3:
-        st.subheader("3. Resto Europa")
+        st.subheader("3. Resto Europa (+ VENT. ES-XX)")
         if cg.get("f3"):
             st.download_button("📥 Resto Europa", data=cg["f3"], file_name="3_Resto_de_Internacional.xlsx")
         else:
-            st.caption("Sin datos (sube Tarifa Internacional).")
-    with col4:
-        st.subheader("4. VENT.")
-        if cg.get("f4"):
-            st.download_button("📥 Tarifa VENT.", data=cg["f4"], file_name="4_Tarifa_VENT.xlsx")
-        else:
-            st.caption("Sin datos (sube Tarifa VENT.).")
+            st.caption("Sin datos (sube Tarifa Internacional y/o VENT.).")
 
     st.write("---")
     st.write("### 🗜️ Descarga Conjunta del Cargador")
@@ -533,7 +518,6 @@ if "cargador_generado" in st.session_state:
             "f1": "1_Tarifa_Nacional_Espana.xlsx",
             "f2": "2_Tarifa_Internacional_Portugal.xlsx",
             "f3": "3_Resto_de_Internacional.xlsx",
-            "f4": "4_Tarifa_VENT.xlsx",
         }
         for key, nombre in nombres.items():
             if cg.get(key):
